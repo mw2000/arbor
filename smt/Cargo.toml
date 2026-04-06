@@ -1,0 +1,13 @@
+[package]
+name = "arbor-smt"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["std"]
+std = []
+
+[dependencies]
+sha2 = { version = "0.10", default-features = false }
+jolt-inlines-sha2 = { git = "https://github.com/a16z/jolt" }
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }

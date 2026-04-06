@@ -1,0 +1,12 @@
+[package]
+name = "arbor-guest"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+guest = []
+
+[dependencies]
+jolt = { package = "jolt-sdk", git = "https://github.com/a16z/jolt" }
+arbor-smt = { path = "../smt", default-features = false }
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }

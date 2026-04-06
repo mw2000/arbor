@@ -1,0 +1,21 @@
+[workspace]
+members = ["smt", "guest", "host"]
+resolver = "2"
+
+[workspace.dependencies]
+jolt-sdk = { git = "https://github.com/a16z/jolt" }
+jolt-inlines-sha2 = { git = "https://github.com/a16z/jolt" }
+
+[profile.guest]
+inherits = "release"
+debug = false
+lto = "fat"
+strip = false
+codegen-units = 1
+
+[patch.crates-io]
+ark-bn254 = { git = "https://github.com/a16z/arkworks-algebra", branch = "dev/twist-shout" }
+ark-ff = { git = "https://github.com/a16z/arkworks-algebra", branch = "dev/twist-shout" }
+ark-ec = { git = "https://github.com/a16z/arkworks-algebra", branch = "dev/twist-shout" }
+ark-serialize = { git = "https://github.com/a16z/arkworks-algebra", branch = "dev/twist-shout" }
+allocative = { git = "https://github.com/facebookexperimental/allocative", rev = "85b773d85d526d068ce94724ff7a7b81203fc95e" }
