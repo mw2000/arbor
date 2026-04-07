@@ -1,61 +1,50 @@
 // Force linker to include jolt-inlines-sha2 inventory registrations.
 extern crate jolt_inlines_sha2;
 
-use arbor_smt::SparseMerkleTree;
-use guest::{DeriveBatchInput, MapUpdate};
+use arbor_smt::CompactRange;
+use guest::AppendInput;
 
-/// Host-side map operator. Maintains the full sparse Merkle tree
-/// and produces batched update inputs for the guest prover.
-pub struct MapOperator {
-    tree: SparseMerkleTree,
+/// Host-side log prover. Maintains the compact range (frontier)
+/// of the append-only Merkle tree and produces inputs for the guest prover.
+pub struct LogProver {
+    compact_range: CompactRange,
 }
 
-impl MapOperator {
+impl LogProver {
     pub fn new() -> Self {
         Self {
-            tree: SparseMerkleTree::new(),
+            compact_range: CompactRange::new(),
         }
     }
 
     pub fn root(&self) -> arbor_smt::Hash {
-        self.tree.root()
+        self.compact_range.root()
     }
 
-    pub fn get(&self, key: &arbor_smt::Key) -> Option<&[u8]> {
-        self.tree.get(key)
+    pub fn size(&self) -> u64 {
+        self.compact_range.size()
     }
 
-    /// Build a `DeriveBatchInput` for a set of key-value updates.
-    /// Generates proofs against the current tree, then applies updates.
+    /// Build an `AppendInput` for a batch of new leaves.
+    /// Snapshots the current frontier, then applies the appends locally.
     /// The returned input can be passed to the guest program for proving.
-    pub fn prepare_batch(&mut self, updates: Vec<(arbor_smt::Key, Vec<u8>)>) -> DeriveBatchInput {
-        let old_root = self.tree.root();
-        let mut map_updates = Vec::with_capacity(updates.len());
+    pub fn prepare_append(&mut self, new_leaves: Vec<Vec<u8>>) -> AppendInput {
+        let input = AppendInput {
+            frontier: self.compact_range.frontier().to_vec(),
+            tree_size: self.compact_range.size(),
+            new_leaves: new_leaves.clone(),
+        };
 
-        for (key, new_value) in updates {
-            // Generate proof against the *current* tree state
-            let proof = self.tree.prove(&key);
-            let old_value = self.tree.get(&key).unwrap_or(&[]).to_vec();
-
-            map_updates.push(MapUpdate {
-                key,
-                value: new_value.clone(),
-                proof,
-                old_value,
-            });
-
-            // Apply the update so the next proof is against the updated tree
-            self.tree.update(key, new_value);
+        // Apply locally so the prover's state stays in sync.
+        for leaf in &new_leaves {
+            self.compact_range.append(leaf);
         }
 
-        DeriveBatchInput {
-            old_root,
-            updates: map_updates,
-        }
+        input
     }
 }
 
-impl Default for MapOperator {
+impl Default for LogProver {
     fn default() -> Self {
         Self::new()
     }
@@ -64,74 +53,62 @@ impl Default for MapOperator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use guest::derive_batch;
+    use arbor_smt::empty_tree_root;
+    use guest::prove_append;
 
     #[test]
-    fn batch_derivation_matches_direct_tree() {
-        let mut operator = MapOperator::new();
+    fn single_append() {
+        let mut prover = LogProver::new();
+        let input = prover.prepare_append(vec![b"leaf0".to_vec()]);
+        let output = prove_append(input);
 
-        let updates = vec![
-            ([0x01; 32], b"value_one".to_vec()),
-            ([0x02; 32], b"value_two".to_vec()),
-            ([0x03; 32], b"value_three".to_vec()),
-        ];
-
-        let batch_input = operator.prepare_batch(updates);
-        let expected_old_root = batch_input.old_root;
-        let output = derive_batch(batch_input);
-
-        assert_eq!(output.new_root, operator.root());
-        assert_eq!(output.old_root, expected_old_root);
-        assert_eq!(output.num_updates, 3);
+        assert_eq!(output.old_root, empty_tree_root());
+        assert_eq!(output.new_root, prover.root());
+        assert_eq!(output.old_size, 0);
+        assert_eq!(output.new_size, 1);
     }
 
     #[test]
-    fn batch_update_existing_keys() {
-        let mut operator = MapOperator::new();
+    fn batch_append() {
+        let mut prover = LogProver::new();
+        let leaves: Vec<Vec<u8>> = (0..5u8).map(|i| vec![i]).collect();
+        let input = prover.prepare_append(leaves);
+        let output = prove_append(input);
 
-        // First batch: insert keys
-        let inserts = vec![
-            ([0xAA; 32], b"first".to_vec()),
-            ([0xBB; 32], b"second".to_vec()),
-        ];
-        let input1 = operator.prepare_batch(inserts);
-        let output1 = derive_batch(input1);
-        assert_eq!(output1.new_root, operator.root());
+        assert_eq!(output.new_root, prover.root());
+        assert_eq!(output.old_size, 0);
+        assert_eq!(output.new_size, 5);
+    }
 
-        // Second batch: update one key, insert another
-        let updates = vec![
-            ([0xAA; 32], b"updated".to_vec()),
-            ([0xCC; 32], b"third".to_vec()),
-        ];
-        let input2 = operator.prepare_batch(updates);
-        let output2 = derive_batch(input2);
-        assert_eq!(output2.new_root, operator.root());
-        // output2.old_root should be the previous batch's new_root
+    #[test]
+    fn sequential_batches() {
+        let mut prover = LogProver::new();
+
+        // First batch: 3 leaves
+        let input1 = prover.prepare_append(vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec()]);
+        let output1 = prove_append(input1);
+        assert_eq!(output1.new_root, prover.root());
+        assert_eq!(output1.new_size, 3);
+
+        // Second batch: 2 more leaves
+        let input2 = prover.prepare_append(vec![b"d".to_vec(), b"e".to_vec()]);
+        let output2 = prove_append(input2);
         assert_eq!(output2.old_root, output1.new_root);
-    }
-
-    #[test]
-    fn single_update_batch() {
-        let mut operator = MapOperator::new();
-
-        let updates = vec![([0xFF; 32], b"solo".to_vec())];
-        let input = operator.prepare_batch(updates);
-        let output = derive_batch(input);
-
-        assert_eq!(output.new_root, operator.root());
-        assert_eq!(output.num_updates, 1);
+        assert_eq!(output2.new_root, prover.root());
+        assert_eq!(output2.old_size, 3);
+        assert_eq!(output2.new_size, 5);
     }
 
     #[test]
     fn empty_batch() {
-        let mut operator = MapOperator::new();
-        let old_root = operator.root();
+        let mut prover = LogProver::new();
+        let root_before = prover.root();
 
-        let input = operator.prepare_batch(vec![]);
-        let output = derive_batch(input);
+        let input = prover.prepare_append(vec![]);
+        let output = prove_append(input);
 
-        assert_eq!(output.new_root, old_root);
-        assert_eq!(output.old_root, old_root);
-        assert_eq!(output.num_updates, 0);
+        assert_eq!(output.old_root, root_before);
+        assert_eq!(output.new_root, root_before);
+        assert_eq!(output.new_size, 0);
     }
 }

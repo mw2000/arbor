@@ -1,0 +1,50 @@
+// Copyright 2016 Google LLC. All Rights Reserved.
+// Licensed under the Apache License, Version 2.0
+
+syntax = "proto3";
+
+package trillian;
+
+option go_package = "github.com/google/trillian";
+
+import "trillian.proto";
+import "google/protobuf/field_mask.proto";
+
+message ListTreesRequest {
+  bool show_deleted = 1;
+}
+
+message ListTreesResponse {
+  repeated Tree tree = 1;
+}
+
+message GetTreeRequest {
+  int64 tree_id = 1;
+}
+
+message CreateTreeRequest {
+  Tree tree = 1;
+  reserved 2;
+}
+
+message UpdateTreeRequest {
+  Tree tree = 1;
+  google.protobuf.FieldMask update_mask = 2;
+}
+
+message DeleteTreeRequest {
+  int64 tree_id = 1;
+}
+
+message UndeleteTreeRequest {
+  int64 tree_id = 1;
+}
+
+service TrillianAdmin {
+  rpc ListTrees(ListTreesRequest) returns (ListTreesResponse) {}
+  rpc GetTree(GetTreeRequest) returns (Tree) {}
+  rpc CreateTree(CreateTreeRequest) returns (Tree) {}
+  rpc UpdateTree(UpdateTreeRequest) returns (Tree) {}
+  rpc DeleteTree(DeleteTreeRequest) returns (Tree) {}
+  rpc UndeleteTree(UndeleteTreeRequest) returns (Tree) {}
+}

@@ -1,0 +1,145 @@
+// Copyright 2016 Google LLC. All Rights Reserved.
+// Licensed under the Apache License, Version 2.0
+
+syntax = "proto3";
+
+package trillian;
+
+option go_package = "github.com/google/trillian";
+
+import "google/protobuf/timestamp.proto";
+import "google/rpc/status.proto";
+import "trillian.proto";
+
+service TrillianLog {
+  rpc QueueLeaf(QueueLeafRequest) returns (QueueLeafResponse) {}
+  rpc GetInclusionProof(GetInclusionProofRequest) returns (GetInclusionProofResponse) {}
+  rpc GetInclusionProofByHash(GetInclusionProofByHashRequest) returns (GetInclusionProofByHashResponse) {}
+  rpc GetConsistencyProof(GetConsistencyProofRequest) returns (GetConsistencyProofResponse) {}
+  rpc GetLatestSignedLogRoot(GetLatestSignedLogRootRequest) returns (GetLatestSignedLogRootResponse) {}
+  rpc GetEntryAndProof(GetEntryAndProofRequest) returns (GetEntryAndProofResponse) {}
+  rpc InitLog(InitLogRequest) returns (InitLogResponse) {}
+  rpc AddSequencedLeaves(AddSequencedLeavesRequest) returns (AddSequencedLeavesResponse) {}
+  rpc GetLeavesByRange(GetLeavesByRangeRequest) returns (GetLeavesByRangeResponse) {}
+}
+
+message ChargeTo {
+  repeated string user = 1;
+}
+
+message QueueLeafRequest {
+  int64 log_id = 1;
+  LogLeaf leaf = 2;
+  ChargeTo charge_to = 3;
+}
+
+message QueueLeafResponse {
+  QueuedLogLeaf queued_leaf = 2;
+}
+
+message GetInclusionProofRequest {
+  int64 log_id = 1;
+  int64 leaf_index = 2;
+  int64 tree_size = 3;
+  ChargeTo charge_to = 4;
+}
+
+message GetInclusionProofResponse {
+  Proof proof = 2;
+  SignedLogRoot signed_log_root = 3;
+}
+
+message GetInclusionProofByHashRequest {
+  int64 log_id = 1;
+  bytes leaf_hash = 2;
+  int64 tree_size = 3;
+  bool order_by_sequence = 4;
+  ChargeTo charge_to = 5;
+}
+
+message GetInclusionProofByHashResponse {
+  repeated Proof proof = 2;
+  SignedLogRoot signed_log_root = 3;
+}
+
+message GetConsistencyProofRequest {
+  int64 log_id = 1;
+  int64 first_tree_size = 2;
+  int64 second_tree_size = 3;
+  ChargeTo charge_to = 4;
+}
+
+message GetConsistencyProofResponse {
+  Proof proof = 2;
+  SignedLogRoot signed_log_root = 3;
+}
+
+message GetLatestSignedLogRootRequest {
+  int64 log_id = 1;
+  ChargeTo charge_to = 2;
+  int64 first_tree_size = 3;
+}
+
+message GetLatestSignedLogRootResponse {
+  SignedLogRoot signed_log_root = 2;
+  Proof proof = 3;
+}
+
+message GetEntryAndProofRequest {
+  int64 log_id = 1;
+  int64 leaf_index = 2;
+  int64 tree_size = 3;
+  ChargeTo charge_to = 4;
+}
+
+message GetEntryAndProofResponse {
+  Proof proof = 2;
+  LogLeaf leaf = 3;
+  SignedLogRoot signed_log_root = 4;
+}
+
+message InitLogRequest {
+  int64 log_id = 1;
+  ChargeTo charge_to = 2;
+}
+
+message InitLogResponse {
+  SignedLogRoot created = 1;
+}
+
+message AddSequencedLeavesRequest {
+  int64 log_id = 1;
+  repeated LogLeaf leaves = 2;
+  ChargeTo charge_to = 4;
+}
+
+message AddSequencedLeavesResponse {
+  repeated QueuedLogLeaf results = 2;
+}
+
+message GetLeavesByRangeRequest {
+  int64 log_id = 1;
+  int64 start_index = 2;
+  int64 count = 3;
+  ChargeTo charge_to = 4;
+}
+
+message GetLeavesByRangeResponse {
+  repeated LogLeaf leaves = 1;
+  SignedLogRoot signed_log_root = 2;
+}
+
+message QueuedLogLeaf {
+  LogLeaf leaf = 1;
+  google.rpc.Status status = 2;
+}
+
+message LogLeaf {
+  bytes merkle_leaf_hash = 1;
+  bytes leaf_value = 2;
+  bytes extra_data = 3;
+  int64 leaf_index = 4;
+  bytes leaf_identity_hash = 5;
+  google.protobuf.Timestamp queue_timestamp = 6;
+  google.protobuf.Timestamp integrate_timestamp = 7;
+}

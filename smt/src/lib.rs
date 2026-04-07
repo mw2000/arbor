@@ -2,11 +2,15 @@
 
 extern crate alloc;
 
+mod compact_merkle;
 mod hash;
 mod proof;
 mod tree;
 
-pub use hash::{compute_empty_hashes, empty_leaf_hash, hash_leaf, hash_node};
+pub use compact_merkle::CompactRange;
+pub use hash::{
+    compute_empty_hashes, empty_leaf_hash, empty_tree_root, hash_leaf, hash_node, hash_rfc6962_leaf,
+};
 pub use proof::{SparseMerkleProof, VerifyError};
 #[cfg(feature = "std")]
 pub use tree::SparseMerkleTree;

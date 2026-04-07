@@ -2,7 +2,7 @@ use crate::{Hash, HASH_BYTES, TREE_DEPTH};
 
 /// Compute SHA-256. Uses the Jolt inline on RISC-V targets (guest),
 /// standard `sha2` crate on all other targets (host).
-fn sha256(data: &[u8]) -> Hash {
+pub(crate) fn sha256(data: &[u8]) -> Hash {
     #[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
     {
         jolt_inlines_sha2::Sha256::digest(data)
@@ -40,6 +40,20 @@ pub fn empty_leaf_hash() -> Hash {
     let mut preimage = [0u8; 1 + 32];
     preimage[0] = 0x00;
     sha256(&preimage)
+}
+
+/// RFC 6962 leaf hash: SHA256(0x00 || data).
+/// Used for append-only Merkle trees (Certificate Transparency / Trillian).
+pub fn hash_rfc6962_leaf(data: &[u8]) -> Hash {
+    let mut preimage = alloc::vec![0u8; 1 + data.len()];
+    preimage[0] = 0x00;
+    preimage[1..].copy_from_slice(data);
+    sha256(&preimage)
+}
+
+/// Root of an empty tree (0 leaves): SHA-256("") per RFC 6962 §2.1.
+pub fn empty_tree_root() -> Hash {
+    sha256(&[])
 }
 
 /// Compute default hashes for each level of an empty sparse Merkle tree.

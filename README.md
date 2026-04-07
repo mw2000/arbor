@@ -1,49 +1,71 @@
 # Arbor
 
-Provable sparse Merkle tree map derivation using [Jolt](https://github.com/a16z/jolt) zkVM.
+Zero-knowledge proofs for append-only Merkle tree updates using [Jolt](https://github.com/a16z/jolt) zkVM.
 
-Arbor extends the [Verifiable Log-Derived Map](https://research.google/pubs/verifiable-data-structures/) pattern: instead of clients replaying an entire log to verify a map was derived correctly, they verify a single Jolt proof that attests "applying these log entries to the old map root produces this new map root."
+Arbor proves that a batch of leaves was correctly appended to an RFC 6962 Merkle tree (the same structure used by [Certificate Transparency](https://www.rfc-editor.org/rfc/rfc6962) and [Trillian](https://github.com/google/trillian)). Instead of clients replaying log operations or checking interactive consistency proofs, they verify a single Jolt proof that attests:
+
+> "The tree with root R_old and size N, after appending these K leaves, has root R_new and size N+K."
 
 ## Architecture
 
 ```
 arbor/
-  smt/    -- no_std sparse Merkle tree: hash functions, proof verification, in-memory tree
-  guest/  -- Jolt guest program: verifies + applies a batch of SMT updates inside the zkVM
-  host/   -- Host-side operator: maintains the full tree, prepares batch inputs, drives prove/verify
+  smt/    -- no_std Merkle tree library: CompactRange (append-only), sparse Merkle tree, hashing
+  guest/  -- Jolt guest program: proves append operations inside the zkVM
+  host/   -- Host-side operator: maintains tree state, prepares inputs, drives prove/verify
 ```
 
-**Guest program** (`derive_batch`): takes an old root and a list of updates (each with key, new value, old value, Merkle proof), verifies each proof against the rolling root, computes the new root, and outputs `(old_root, new_root, num_updates)`.
+### Compact Range
 
-**SHA-256**: uses `jolt-inlines-sha2` (custom RISC-V instructions) when compiled for the zkVM guest, standard `sha2` crate on the host.
+The key data structure is the **compact range** (frontier): O(log N) subtree roots that compactly represent an N-leaf append-only Merkle tree. This is sufficient to compute the tree root and to append new leaves without storing the full tree.
+
+For a tree of size N, the frontier contains one hash per set bit in the binary representation of N. For example, a 13-leaf tree (binary 1101) has 3 frontier entries: roots of subtrees of size 8, 4, and 1.
+
+### Guest Program
+
+`prove_append` takes:
+- **Input**: frontier hashes, current tree size, new leaf data
+- **Output**: old root, new root, old size, new size
+
+The Jolt proof attests this computation was performed correctly.
+
+### Hashing
+
+RFC 6962 domain-separated SHA-256:
+- Leaf: `SHA256(0x00 || data)`
+- Node: `SHA256(0x01 || left || right)`
+- Empty tree: `SHA256("")`
+
+Uses `jolt-inlines-sha2` (custom RISC-V instructions) when compiled for the zkVM guest, standard `sha2` crate on the host.
 
 ## Usage
 
 ```rust
-use arbor_host::MapOperator;
+use arbor_host::LogProver;
 
-let mut operator = MapOperator::new();
-let batch_input = operator.prepare_batch(vec![
-    ([0x01; 32], b"value_one".to_vec()),
-    ([0x02; 32], b"value_two".to_vec()),
+let mut prover = LogProver::new();
+let input = prover.prepare_append(vec![
+    b"entry_1".to_vec(),
+    b"entry_2".to_vec(),
+    b"entry_3".to_vec(),
 ]);
 
 // Native execution (no proof)
-let output = guest::derive_batch(batch_input.clone());
-assert_eq!(output.new_root, operator.root());
+let output = guest::prove_append(input.clone());
+assert_eq!(output.new_root, prover.root());
 
 // Prove and verify with Jolt
-let mut program = guest::compile_derive_batch("/tmp/arbor-guest-targets");
-let shared = guest::preprocess_shared_derive_batch(&mut program).unwrap();
-let prover_pp = guest::preprocess_prover_derive_batch(shared.clone());
-let verifier_pp = guest::preprocess_verifier_derive_batch(
+let mut program = guest::compile_prove_append("/tmp/arbor-guest-targets");
+let shared = guest::preprocess_shared_prove_append(&mut program).unwrap();
+let prover_pp = guest::preprocess_prover_prove_append(shared.clone());
+let verifier_pp = guest::preprocess_verifier_prove_append(
     shared, prover_pp.generators.to_verifier_setup(), None,
 );
-let prove = guest::build_prover_derive_batch(program, prover_pp);
-let verify = guest::build_verifier_derive_batch(verifier_pp);
+let prove = guest::build_prover_prove_append(program, prover_pp);
+let verify = guest::build_verifier_prove_append(verifier_pp);
 
-let (output, proof, io) = prove(batch_input.clone());
-assert!(verify(batch_input, output, io.panic, proof));
+let (output, proof, io) = prove(input.clone());
+assert!(verify(input, output, io.panic, proof));
 ```
 
 ## Building & Testing
@@ -58,8 +80,13 @@ cargo test --workspace
 cargo test --release -p arbor-host --test prove_verify
 ```
 
-## Performance
+## Trillian Integration
 
-Single SMT update (256-level tree, SHA-256):
-- ~6.4M total cycles (908K real RISC-V + 5.5M virtual)
-- ~20s proving time at 318 kHz (release, Apple Silicon)
+Arbor is designed to prove updates to Trillian's append-only log. The integration surface is Trillian's gRPC Log API:
+
+1. Fetch new leaves via `GetLeavesByRange`
+2. Package leaf data + current frontier into `AppendInput`
+3. Generate Jolt proof via the guest program
+4. Clients verify the proof instead of replaying log operations
+
+The `LogProver` maintains the compact range state between batches, so sequential proofs chain together: each batch's `old_root` matches the previous batch's `new_root`.

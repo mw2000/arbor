@@ -3,40 +3,35 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
-use arbor_smt::{Hash, Key, SparseMerkleProof};
+use arbor_smt::{CompactRange, Hash};
 use serde::{Deserialize, Serialize};
 
-/// A single update operation in a map derivation batch.
+/// Input to the append proof guest program.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct MapUpdate {
-    pub key: Key,
-    pub value: Vec<u8>,
-    /// Proof of the current value (or non-membership) at this key
-    /// against the tree root *before* this update is applied.
-    pub proof: SparseMerkleProof,
-    /// The old value at this key (empty if non-membership).
-    pub old_value: Vec<u8>,
+pub struct AppendInput {
+    /// Compact range frontier of the existing tree (subtree roots, largest first).
+    pub frontier: Vec<Hash>,
+    /// Current tree size (number of leaves).
+    pub tree_size: u64,
+    /// New leaf data to append.
+    pub new_leaves: Vec<Vec<u8>>,
 }
 
-/// Input to the map derivation guest program.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DeriveBatchInput {
-    pub old_root: Hash,
-    pub updates: Vec<MapUpdate>,
-}
-
-/// Output of the map derivation guest program.
+/// Output of the append proof guest program.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct DeriveBatchOutput {
+pub struct AppendOutput {
     pub old_root: Hash,
     pub new_root: Hash,
-    pub num_updates: u32,
+    pub old_size: u64,
+    pub new_size: u64,
 }
 
-/// Execute the batch derivation: verify each update against the rolling root,
-/// then apply it. Returns the final root.
+/// Prove that appending `new_leaves` to a Merkle tree with the given
+/// compact range produces the correct new root.
 ///
-/// This is the function that runs inside the zkVM guest.
+/// This runs inside the zkVM guest. The Jolt proof attests:
+/// "the tree with frontier F and size N has root R_old, and after
+/// appending these leaves, the tree has root R_new and size N+K."
 #[jolt::provable(
     max_input_size = 65536,
     max_output_size = 4096,
@@ -44,26 +39,19 @@ pub struct DeriveBatchOutput {
     heap_size = 1048576,
     max_trace_length = 16777216
 )]
-fn derive_batch(input: DeriveBatchInput) -> DeriveBatchOutput {
-    let mut current_root = input.old_root;
+fn prove_append(input: AppendInput) -> AppendOutput {
+    let mut compact = CompactRange::from_parts(input.frontier, input.tree_size);
+    let old_root = compact.root();
+    let old_size = compact.size();
 
-    for update in &input.updates {
-        // Verify the old value (or non-membership) against the current root
-        update
-            .proof
-            .verify(&current_root, &update.key, &update.old_value)
-            .expect("proof verification failed for old value");
-
-        // Compute the new root with the updated value
-        current_root = update
-            .proof
-            .compute_root(&update.key, &update.value)
-            .expect("failed to compute new root");
+    for leaf in &input.new_leaves {
+        compact.append(leaf);
     }
 
-    DeriveBatchOutput {
-        old_root: input.old_root,
-        new_root: current_root,
-        num_updates: input.updates.len() as u32,
+    AppendOutput {
+        old_root,
+        new_root: compact.root(),
+        old_size,
+        new_size: compact.size(),
     }
 }

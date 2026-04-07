@@ -1,0 +1,69 @@
+// Copyright 2016 Google LLC. All Rights Reserved.
+// Licensed under the Apache License, Version 2.0
+
+syntax = "proto3";
+
+option go_package = "github.com/google/trillian";
+
+package trillian;
+
+import "google/protobuf/any.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+enum LogRootFormat {
+  LOG_ROOT_FORMAT_UNKNOWN = 0;
+  LOG_ROOT_FORMAT_V1 = 1;
+}
+
+enum HashStrategy {
+  UNKNOWN_HASH_STRATEGY = 0;
+  RFC6962_SHA256 = 1;
+  TEST_MAP_HASHER = 2;
+  OBJECT_RFC6962_SHA256 = 3;
+  CONIKS_SHA512_256 = 4;
+  CONIKS_SHA256 = 5;
+}
+
+enum TreeState {
+  UNKNOWN_TREE_STATE = 0;
+  ACTIVE = 1;
+  FROZEN = 2;
+  DEPRECATED_SOFT_DELETED = 3 [deprecated = true];
+  DEPRECATED_HARD_DELETED = 4 [deprecated = true];
+  DRAINING = 5;
+}
+
+enum TreeType {
+  UNKNOWN_TREE_TYPE = 0;
+  LOG = 1;
+  PREORDERED_LOG = 3;
+  reserved 2;
+  reserved "MAP";
+}
+
+message Tree {
+  int64 tree_id = 1;
+  TreeState tree_state = 2;
+  TreeType tree_type = 3;
+  string display_name = 8;
+  string description = 9;
+  google.protobuf.Any storage_settings = 13;
+  google.protobuf.Duration max_root_duration = 15;
+  google.protobuf.Timestamp create_time = 16;
+  google.protobuf.Timestamp update_time = 17;
+  bool deleted = 19;
+  google.protobuf.Timestamp delete_time = 20;
+  reserved 4 to 7, 10 to 12, 14, 18;
+}
+
+message SignedLogRoot {
+  bytes log_root = 8;
+  reserved 1 to 7, 9;
+}
+
+message Proof {
+  int64 leaf_index = 1;
+  repeated bytes hashes = 3;
+  reserved 2;
+}
