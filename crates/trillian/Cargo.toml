@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-arbor-core = { path = "../smt" }
+arbor-core = { path = "../core" }
 tonic = "0.12"
 prost = "0.13"
 prost-types = "0.13"
