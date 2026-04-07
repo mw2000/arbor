@@ -1,3 +1,5 @@
+[![Arbor](assets/banner.png)](assets/banner.png)
+
 # Arbor
 
 Zero-knowledge proofs for [Trillian](https://github.com/google/trillian) log updates using [Jolt](https://github.com/a16z/jolt) zkVM.
