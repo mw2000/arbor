@@ -1,0 +1,19 @@
+[package]
+name = "arbor-verify"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+arbor-core = { path = "../core" }
+guest = { package = "arbor-guest", path = "../guest" }
+jolt-sdk = { workspace = true, features = ["host"] }
+jolt-inlines-sha2 = { workspace = true, features = ["host"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+tracing = "0.1"
+
+[dev-dependencies]
+tracing-subscriber = "0.3"
+
+[package.metadata.cargo-machete]
+ignored = ["jolt-inlines-sha2"]

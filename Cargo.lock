@@ -162,6 +162,7 @@ dependencies = [
  "arbor-trillian",
  "jolt-inlines-sha2",
  "jolt-sdk",
+ "serde",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -179,6 +180,20 @@ dependencies = [
  "tokio-test",
  "tonic",
  "tonic-build",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "arbor-verify"
+version = "0.1.0"
+dependencies = [
+ "arbor-core",
+ "arbor-guest",
+ "jolt-inlines-sha2",
+ "jolt-sdk",
+ "serde",
+ "thiserror",
  "tracing",
  "tracing-subscriber",
 ]
