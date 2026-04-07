@@ -13,5 +13,6 @@ pub mod proto {
 mod log_root;
 mod syncer;
 
+pub use arbor_core::proof::{ConsistencyProof, InclusionProof};
 pub use log_root::{LogRootV1, ParseLogRootError};
 pub use syncer::{SyncResult, SyncerError, TrillianSyncer};

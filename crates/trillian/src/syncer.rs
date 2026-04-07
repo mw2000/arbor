@@ -1,4 +1,5 @@
-use arbor_core::CompactRange;
+use arbor_core::proof::{ConsistencyProof, InclusionProof};
+use arbor_core::{CompactRange, Hash, HASH_BYTES};
 use tonic::transport::Channel;
 use tracing::{debug, info};
 
@@ -6,8 +7,9 @@ use crate::log_root::LogRootV1;
 use crate::proto::trillian_admin_client::TrillianAdminClient;
 use crate::proto::trillian_log_client::TrillianLogClient;
 use crate::proto::{
-    CreateTreeRequest, GetLatestSignedLogRootRequest, GetLeavesByRangeRequest, InitLogRequest,
-    LogLeaf, QueueLeafRequest, Tree, TreeState, TreeType,
+    CreateTreeRequest, GetConsistencyProofRequest, GetInclusionProofByHashRequest,
+    GetInclusionProofRequest, GetLatestSignedLogRootRequest, GetLeavesByRangeRequest,
+    InitLogRequest, LogLeaf, QueueLeafRequest, Tree, TreeState, TreeType,
 };
 
 /// Maximum number of leaves to fetch in a single gRPC call.
@@ -32,6 +34,12 @@ pub enum SyncerError {
 
     #[error("tree creation failed: missing tree in response")]
     TreeCreationFailed,
+
+    #[error("missing proof in response")]
+    MissingProof,
+
+    #[error("invalid proof hash length: expected {expected}, got {actual}")]
+    InvalidHashLength { expected: usize, actual: usize },
 }
 
 // Minimal hex encoding (avoids adding the `hex` crate).
@@ -251,6 +259,127 @@ impl TrillianSyncer {
         Ok(fetched)
     }
 
+    /// Fetch an inclusion proof for a leaf at `leaf_index` in a tree of `tree_size`.
+    ///
+    /// Calls Trillian's `GetInclusionProof` RPC and returns an `InclusionProof`
+    /// that can be verified offline with `proof.verify(leaf_hash, root)`.
+    pub async fn get_inclusion_proof(
+        &mut self,
+        leaf_index: u64,
+        tree_size: u64,
+    ) -> Result<InclusionProof, SyncerError> {
+        let resp = self
+            .log_client
+            .get_inclusion_proof(GetInclusionProofRequest {
+                log_id: self.log_id,
+                leaf_index: leaf_index as i64,
+                tree_size: tree_size as i64,
+                ..Default::default()
+            })
+            .await?;
+
+        let proto_proof = resp
+            .into_inner()
+            .proof
+            .ok_or(SyncerError::MissingProof)?;
+
+        let hashes = proto_hashes_to_hashes(&proto_proof.hashes)?;
+
+        debug!(
+            leaf_index,
+            tree_size,
+            proof_len = hashes.len(),
+            "fetched inclusion proof from Trillian"
+        );
+
+        Ok(InclusionProof {
+            leaf_index,
+            tree_size,
+            hashes,
+        })
+    }
+
+    /// Fetch an inclusion proof by the leaf's Merkle hash.
+    ///
+    /// Useful when you know the leaf data but not its index. Trillian returns
+    /// the first matching proof.
+    pub async fn get_inclusion_proof_by_hash(
+        &mut self,
+        leaf_hash: &[u8],
+        tree_size: u64,
+    ) -> Result<InclusionProof, SyncerError> {
+        let resp = self
+            .log_client
+            .get_inclusion_proof_by_hash(GetInclusionProofByHashRequest {
+                log_id: self.log_id,
+                leaf_hash: leaf_hash.to_vec(),
+                tree_size: tree_size as i64,
+                order_by_sequence: true,
+                ..Default::default()
+            })
+            .await?;
+
+        let proofs = resp.into_inner().proof;
+        let proto_proof = proofs.into_iter().next().ok_or(SyncerError::MissingProof)?;
+
+        let hashes = proto_hashes_to_hashes(&proto_proof.hashes)?;
+        let leaf_index = proto_proof.leaf_index as u64;
+
+        debug!(
+            leaf_index,
+            tree_size,
+            proof_len = hashes.len(),
+            "fetched inclusion proof by hash from Trillian"
+        );
+
+        Ok(InclusionProof {
+            leaf_index,
+            tree_size,
+            hashes,
+        })
+    }
+
+    /// Fetch a consistency proof between two tree sizes.
+    ///
+    /// Proves that the tree at `first_tree_size` is a prefix of the tree at
+    /// `second_tree_size`. The returned proof can be verified offline with
+    /// `proof.verify(old_root, new_root)`.
+    pub async fn get_consistency_proof(
+        &mut self,
+        first_tree_size: u64,
+        second_tree_size: u64,
+    ) -> Result<ConsistencyProof, SyncerError> {
+        let resp = self
+            .log_client
+            .get_consistency_proof(GetConsistencyProofRequest {
+                log_id: self.log_id,
+                first_tree_size: first_tree_size as i64,
+                second_tree_size: second_tree_size as i64,
+                ..Default::default()
+            })
+            .await?;
+
+        let proto_proof = resp
+            .into_inner()
+            .proof
+            .ok_or(SyncerError::MissingProof)?;
+
+        let hashes = proto_hashes_to_hashes(&proto_proof.hashes)?;
+
+        debug!(
+            first_tree_size,
+            second_tree_size,
+            proof_len = hashes.len(),
+            "fetched consistency proof from Trillian"
+        );
+
+        Ok(ConsistencyProof {
+            old_size: first_tree_size,
+            new_size: second_tree_size,
+            hashes,
+        })
+    }
+
     /// Convenience: queue leaves, wait for integration, sync, and return
     /// the `CompactRange` state before and after for proving.
     ///
@@ -303,6 +432,24 @@ impl TrillianSyncer {
             leaf_values: leaves,
         })
     }
+}
+
+/// Convert Trillian's `repeated bytes` proof hashes into `[u8; 32]` arrays.
+fn proto_hashes_to_hashes(proto_hashes: &[Vec<u8>]) -> Result<Vec<Hash>, SyncerError> {
+    proto_hashes
+        .iter()
+        .map(|h| {
+            if h.len() != HASH_BYTES {
+                return Err(SyncerError::InvalidHashLength {
+                    expected: HASH_BYTES,
+                    actual: h.len(),
+                });
+            }
+            let mut hash = [0u8; HASH_BYTES];
+            hash.copy_from_slice(h);
+            Ok(hash)
+        })
+        .collect()
 }
 
 /// Result of a `queue_and_sync` operation, containing all the data needed
