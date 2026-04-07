@@ -1,110 +1,147 @@
 // Force linker to include jolt-inlines-sha2 inventory registrations.
 extern crate jolt_inlines_sha2;
 
-use arbor_core::CompactRange;
+pub use arbor_trillian::{SyncResult, SyncerError, TrillianSyncer};
 use guest::AppendInput;
 
-/// Host-side log prover. Maintains the compact range (frontier)
-/// of the append-only Merkle tree and produces inputs for the guest prover.
+/// Host-side log prover. Wraps a `TrillianSyncer` to sync leaves from
+/// a Trillian log and prepare inputs for the Jolt guest prover.
 pub struct LogProver {
-    compact_range: CompactRange,
+    syncer: TrillianSyncer,
 }
 
 impl LogProver {
-    pub fn new() -> Self {
-        Self {
-            compact_range: CompactRange::new(),
-        }
+    /// Connect to a Trillian gRPC endpoint and use an existing log tree.
+    pub async fn connect(endpoint: &str, log_id: i64) -> Result<Self, SyncerError> {
+        let syncer = TrillianSyncer::connect(endpoint, log_id).await?;
+        Ok(Self { syncer })
+    }
+
+    /// Connect to a Trillian gRPC endpoint and create a new log tree.
+    pub async fn connect_and_create_tree(endpoint: &str) -> Result<Self, SyncerError> {
+        let syncer = TrillianSyncer::connect_and_create_tree(endpoint).await?;
+        Ok(Self { syncer })
+    }
+
+    pub fn log_id(&self) -> i64 {
+        self.syncer.log_id()
     }
 
     pub fn root(&self) -> arbor_core::Hash {
-        self.compact_range.root()
+        self.syncer.local_root()
     }
 
     pub fn size(&self) -> u64 {
-        self.compact_range.size()
+        self.syncer.local_size()
     }
 
-    /// Build an `AppendInput` for a batch of new leaves.
-    /// Snapshots the current frontier, then applies the appends locally.
-    /// The returned input can be passed to the guest program for proving.
-    pub fn prepare_append(&mut self, new_leaves: Vec<Vec<u8>>) -> AppendInput {
+    /// Queue leaves to Trillian, wait for integration, sync, and return
+    /// an `AppendInput` ready for the guest prover.
+    ///
+    /// This is the primary entry point: it handles the full
+    /// Trillian sync → AppendInput construction pipeline.
+    pub async fn sync_and_prepare(
+        &mut self,
+        leaves: Vec<Vec<u8>>,
+    ) -> Result<(AppendInput, SyncResult), SyncerError> {
+        let result = self.syncer.queue_and_sync(leaves).await?;
         let input = AppendInput {
-            frontier: self.compact_range.frontier().to_vec(),
-            tree_size: self.compact_range.size(),
-            new_leaves: new_leaves.clone(),
+            frontier: result.old_frontier.clone(),
+            tree_size: result.old_size,
+            new_leaves: result.leaf_values.clone(),
         };
-
-        // Apply locally so the prover's state stays in sync.
-        for leaf in &new_leaves {
-            self.compact_range.append(leaf);
-        }
-
-        input
+        Ok((input, result))
     }
-}
 
-impl Default for LogProver {
-    fn default() -> Self {
-        Self::new()
+    /// Lower-level: construct an `AppendInput` from an existing `SyncResult`.
+    pub fn prepare_from_sync(result: &SyncResult) -> AppendInput {
+        AppendInput {
+            frontier: result.old_frontier.clone(),
+            tree_size: result.old_size,
+            new_leaves: result.leaf_values.clone(),
+        }
+    }
+
+    /// Access the underlying syncer for direct Trillian operations.
+    pub fn syncer(&self) -> &TrillianSyncer {
+        &self.syncer
+    }
+
+    /// Mutable access to the underlying syncer.
+    pub fn syncer_mut(&mut self) -> &mut TrillianSyncer {
+        &mut self.syncer
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use arbor_core::empty_tree_root;
-    use guest::prove_append;
+    use arbor_core::{empty_tree_root, CompactRange};
+    use guest::{prove_append, AppendInput};
+
+    /// Helper: build an AppendInput directly from leaf data (no Trillian).
+    /// Used for fast native-execution unit tests.
+    fn prepare_native(
+        compact_range: &mut CompactRange,
+        new_leaves: Vec<Vec<u8>>,
+    ) -> AppendInput {
+        let input = AppendInput {
+            frontier: compact_range.frontier().to_vec(),
+            tree_size: compact_range.size(),
+            new_leaves: new_leaves.clone(),
+        };
+        for leaf in &new_leaves {
+            compact_range.append(leaf);
+        }
+        input
+    }
 
     #[test]
     fn single_append() {
-        let mut prover = LogProver::new();
-        let input = prover.prepare_append(vec![b"leaf0".to_vec()]);
+        let mut cr = CompactRange::new();
+        let input = prepare_native(&mut cr, vec![b"leaf0".to_vec()]);
         let output = prove_append(input);
 
         assert_eq!(output.old_root, empty_tree_root());
-        assert_eq!(output.new_root, prover.root());
+        assert_eq!(output.new_root, cr.root());
         assert_eq!(output.old_size, 0);
         assert_eq!(output.new_size, 1);
     }
 
     #[test]
     fn batch_append() {
-        let mut prover = LogProver::new();
+        let mut cr = CompactRange::new();
         let leaves: Vec<Vec<u8>> = (0..5u8).map(|i| vec![i]).collect();
-        let input = prover.prepare_append(leaves);
+        let input = prepare_native(&mut cr, leaves);
         let output = prove_append(input);
 
-        assert_eq!(output.new_root, prover.root());
+        assert_eq!(output.new_root, cr.root());
         assert_eq!(output.old_size, 0);
         assert_eq!(output.new_size, 5);
     }
 
     #[test]
     fn sequential_batches() {
-        let mut prover = LogProver::new();
+        let mut cr = CompactRange::new();
 
-        // First batch: 3 leaves
-        let input1 = prover.prepare_append(vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec()]);
+        let input1 = prepare_native(&mut cr, vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec()]);
         let output1 = prove_append(input1);
-        assert_eq!(output1.new_root, prover.root());
+        assert_eq!(output1.new_root, cr.root());
         assert_eq!(output1.new_size, 3);
 
-        // Second batch: 2 more leaves
-        let input2 = prover.prepare_append(vec![b"d".to_vec(), b"e".to_vec()]);
+        let input2 = prepare_native(&mut cr, vec![b"d".to_vec(), b"e".to_vec()]);
         let output2 = prove_append(input2);
         assert_eq!(output2.old_root, output1.new_root);
-        assert_eq!(output2.new_root, prover.root());
+        assert_eq!(output2.new_root, cr.root());
         assert_eq!(output2.old_size, 3);
         assert_eq!(output2.new_size, 5);
     }
 
     #[test]
     fn empty_batch() {
-        let mut prover = LogProver::new();
-        let root_before = prover.root();
+        let mut cr = CompactRange::new();
+        let root_before = cr.root();
 
-        let input = prover.prepare_append(vec![]);
+        let input = prepare_native(&mut cr, vec![]);
         let output = prove_append(input);
 
         assert_eq!(output.old_root, root_before);

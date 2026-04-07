@@ -1,15 +1,24 @@
-use arbor_host::LogProver;
-
 // Force linker to include jolt-inlines-sha2's inventory registrations.
 extern crate jolt_inlines_sha2;
+
+use arbor_core::CompactRange;
+use guest::AppendInput;
 
 #[test]
 fn prove_and_verify_append() {
     tracing_subscriber::fmt::init();
 
-    let mut prover = LogProver::new();
+    let mut cr = CompactRange::new();
     let leaves: Vec<Vec<u8>> = vec![b"leaf0".to_vec(), b"leaf1".to_vec(), b"leaf2".to_vec()];
-    let append_input = prover.prepare_append(leaves);
+
+    let append_input = AppendInput {
+        frontier: cr.frontier().to_vec(),
+        tree_size: cr.size(),
+        new_leaves: leaves.clone(),
+    };
+    for leaf in &leaves {
+        cr.append(leaf);
+    }
 
     // Compile and preprocess the guest program
     let target_dir = "/tmp/arbor-guest-targets";
@@ -26,7 +35,7 @@ fn prove_and_verify_append() {
     let verify_input = append_input.clone();
     let (output, proof, io_device) = prove(append_input);
 
-    assert_eq!(output.new_root, prover.root());
+    assert_eq!(output.new_root, cr.root());
     assert_eq!(output.old_size, 0);
     assert_eq!(output.new_size, 3);
 

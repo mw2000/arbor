@@ -4,34 +4,32 @@
 //!   cd docker && docker compose up -d
 //!
 //! Run (must be release mode for reasonable proving time):
-//!   cargo test --release -p arbor-host --test trillian_prove -- --ignored --nocapture
+//!   cargo nextest run --release -p arbor-host --test trillian_prove --run-ignored ignored-only --no-capture
 
 extern crate jolt_inlines_sha2;
 
-use arbor_trillian::TrillianSyncer;
-use guest::AppendInput;
+use arbor_host::LogProver;
 
 #[tokio::test]
 #[ignore = "requires local Trillian (docker compose up) and --release"]
 async fn trillian_prove_and_verify() {
     tracing_subscriber::fmt::init();
 
-    // --- 1. Sync leaves from Trillian ---
-    let endpoint = "http://localhost:8090";
-    let mut syncer = TrillianSyncer::connect_and_create_tree(endpoint)
+    // --- 1. Connect to Trillian and sync leaves ---
+    let mut prover = LogProver::connect_and_create_tree("http://localhost:8090")
         .await
         .expect("failed to connect to Trillian");
 
-    println!("created Trillian log tree (id={})", syncer.log_id());
+    println!("created Trillian log tree (id={})", prover.log_id());
 
     let leaves: Vec<Vec<u8>> = (0..3u8)
         .map(|i| format!("trillian-leaf-{i}").into_bytes())
         .collect();
 
-    let result = syncer
-        .queue_and_sync(leaves)
+    let (append_input, result) = prover
+        .sync_and_prepare(leaves)
         .await
-        .expect("queue_and_sync failed");
+        .expect("sync_and_prepare failed");
 
     println!(
         "synced {} leaves: old_root={}, new_root={}",
@@ -40,14 +38,7 @@ async fn trillian_prove_and_verify() {
         hex(&result.new_root),
     );
 
-    // --- 2. Build AppendInput from SyncResult ---
-    let append_input = AppendInput {
-        frontier: result.old_frontier,
-        tree_size: result.old_size,
-        new_leaves: result.leaf_values,
-    };
-
-    // --- 3. Compile guest, preprocess, prove ---
+    // --- 2. Compile guest, preprocess, prove ---
     println!("compiling guest program...");
     let target_dir = "/tmp/arbor-guest-targets";
     let mut program = guest::compile_prove_append(target_dir);
@@ -78,7 +69,7 @@ async fn trillian_prove_and_verify() {
     assert_eq!(output.old_size, result.old_size);
     assert_eq!(output.new_size, result.new_size);
 
-    // --- 4. Verify the proof ---
+    // --- 3. Verify the proof ---
     println!("verifying...");
     let is_valid = verify(verify_input, output, io_device.panic, proof);
     assert!(is_valid, "ZK proof verification failed!");
