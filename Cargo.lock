@@ -136,10 +136,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
+name = "arbor-core"
+version = "0.1.0"
+dependencies = [
+ "jolt-inlines-sha2",
+ "serde",
+ "sha2",
+]
+
+[[package]]
 name = "arbor-guest"
 version = "0.1.0"
 dependencies = [
- "arbor-smt",
+ "arbor-core",
  "jolt-sdk",
  "serde",
 ]
@@ -148,8 +157,8 @@ dependencies = [
 name = "arbor-host"
 version = "0.1.0"
 dependencies = [
+ "arbor-core",
  "arbor-guest",
- "arbor-smt",
  "arbor-trillian",
  "jolt-inlines-sha2",
  "jolt-sdk",
@@ -159,19 +168,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "arbor-smt"
-version = "0.1.0"
-dependencies = [
- "jolt-inlines-sha2",
- "serde",
- "sha2",
-]
-
-[[package]]
 name = "arbor-trillian"
 version = "0.1.0"
 dependencies = [
- "arbor-smt",
+ "arbor-core",
  "prost",
  "prost-types",
  "thiserror",

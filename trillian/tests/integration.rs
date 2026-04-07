@@ -6,7 +6,7 @@
 //! Run:
 //!   cargo test -p arbor-trillian --test integration -- --ignored
 
-use arbor_smt::empty_tree_root;
+use arbor_core::empty_tree_root;
 use arbor_trillian::TrillianSyncer;
 
 /// Test the full flow: create tree, queue leaves, sync, verify roots match.

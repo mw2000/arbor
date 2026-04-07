@@ -1,4 +1,4 @@
-use arbor_smt::CompactRange;
+use arbor_core::CompactRange;
 use tonic::transport::Channel;
 use tracing::{debug, info};
 
@@ -125,7 +125,7 @@ impl TrillianSyncer {
         &self.compact_range
     }
 
-    pub fn local_root(&self) -> arbor_smt::Hash {
+    pub fn local_root(&self) -> arbor_core::Hash {
         self.compact_range.root()
     }
 
@@ -309,10 +309,10 @@ impl TrillianSyncer {
 /// to construct an `AppendInput` for the Jolt guest prover.
 #[derive(Debug, Clone)]
 pub struct SyncResult {
-    pub old_frontier: Vec<arbor_smt::Hash>,
+    pub old_frontier: Vec<arbor_core::Hash>,
     pub old_size: u64,
-    pub old_root: arbor_smt::Hash,
-    pub new_root: arbor_smt::Hash,
+    pub old_root: arbor_core::Hash,
+    pub new_root: arbor_core::Hash,
     pub new_size: u64,
     pub leaf_values: Vec<Vec<u8>>,
 }

@@ -3,7 +3,7 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
-use arbor_smt::{CompactRange, Hash};
+use arbor_core::{CompactRange, Hash};
 use serde::{Deserialize, Serialize};
 
 /// Input to the append proof guest program.

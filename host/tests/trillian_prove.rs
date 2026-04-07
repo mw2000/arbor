@@ -56,8 +56,7 @@ async fn trillian_prove_and_verify() {
     let shared = guest::preprocess_shared_prove_append(&mut program).unwrap();
     let prover_pp = guest::preprocess_prover_prove_append(shared.clone());
     let verifier_setup = prover_pp.generators.to_verifier_setup();
-    let verifier_pp =
-        guest::preprocess_verifier_prove_append(shared, verifier_setup, None);
+    let verifier_pp = guest::preprocess_verifier_prove_append(shared, verifier_setup, None);
 
     let prove = guest::build_prover_prove_append(program, prover_pp);
     let verify = guest::build_verifier_prove_append(verifier_pp);

@@ -8,5 +8,5 @@ guest = []
 
 [dependencies]
 jolt = { package = "jolt-sdk", git = "https://github.com/a16z/jolt" }
-arbor-smt = { path = "../smt", default-features = false }
+arbor-core = { path = "../smt", default-features = false }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }

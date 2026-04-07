@@ -2,7 +2,7 @@
 
 Zero-knowledge proofs for append-only Merkle tree updates using [Jolt](https://github.com/a16z/jolt) zkVM.
 
-Arbor proves that a batch of leaves was correctly appended to an RFC 6962 Merkle tree (the same structure used by [Certificate Transparency](https://www.rfc-editor.org/rfc/rfc6962) and [Trillian](https://github.com/google/trillian)). Instead of clients replaying log operations or checking interactive consistency proofs, they verify a single Jolt proof that attests:
+Arbor proves that a batch of leaves was correctly appended to an RFC 6962 Merkle tree (the same structure used by [Certificate Transparency](https://www.rfc-editor.org/rfc/rfc6962) and [Trillian](https://github.com/google/trillian)). Instead of clients replaying log operations or checking interactive consistency proofs, they verify a single Jolt proof:
 
 > "The tree with root R_old and size N, after appending these K leaves, has root R_new and size N+K."
 
@@ -10,9 +10,11 @@ Arbor proves that a batch of leaves was correctly appended to an RFC 6962 Merkle
 
 ```
 arbor/
-  smt/    -- no_std Merkle tree library: CompactRange (append-only), sparse Merkle tree, hashing
-  guest/  -- Jolt guest program: proves append operations inside the zkVM
-  host/   -- Host-side operator: maintains tree state, prepares inputs, drives prove/verify
+  smt/        -- arbor-core: no_std Merkle tree library (CompactRange, RFC 6962 hashing)
+  guest/      -- Jolt guest program: proves append operations inside the zkVM
+  host/       -- Host-side LogProver: maintains tree state, prepares inputs, drives prove/verify
+  trillian/   -- Trillian gRPC integration: syncs log leaves, verifies roots, orchestrates proving
+  docker/     -- Docker Compose for local Trillian (MySQL + log server + signer)
 ```
 
 ### Compact Range
@@ -40,6 +42,8 @@ Uses `jolt-inlines-sha2` (custom RISC-V instructions) when compiled for the zkVM
 
 ## Usage
 
+### Standalone (no Trillian)
+
 ```rust
 use arbor_host::LogProver;
 
@@ -47,7 +51,6 @@ let mut prover = LogProver::new();
 let input = prover.prepare_append(vec![
     b"entry_1".to_vec(),
     b"entry_2".to_vec(),
-    b"entry_3".to_vec(),
 ]);
 
 // Native execution (no proof)
@@ -68,25 +71,54 @@ let (output, proof, io) = prove(input.clone());
 assert!(verify(input, output, io.panic, proof));
 ```
 
-## Building & Testing
+### With Trillian
 
-Requires Rust 1.94 (set via `rust-toolchain.toml`) with the `riscv64imac-unknown-none-elf` target, and the [Jolt CLI](https://github.com/a16z/jolt) (`cargo install --path .` from the Jolt repo).
+```rust
+use arbor_trillian::TrillianSyncer;
+use guest::AppendInput;
 
-```bash
-# Unit tests (fast, native execution only)
-cargo test --workspace
+// Connect to Trillian and create a log tree
+let mut syncer = TrillianSyncer::connect_and_create_tree("http://localhost:8090").await?;
 
-# End-to-end prove/verify test (compiles guest for RISC-V, generates Jolt proof)
-cargo test --release -p arbor-host --test prove_verify
+// Queue leaves, wait for integration, sync and verify roots
+let result = syncer.queue_and_sync(vec![b"leaf-0".to_vec(), b"leaf-1".to_vec()]).await?;
+
+// Build proving input from sync result
+let input = AppendInput {
+    frontier: result.old_frontier,
+    tree_size: result.old_size,
+    new_leaves: result.leaf_values,
+};
+
+// Generate and verify Jolt proof (same as standalone)
 ```
 
-## Trillian Integration
+## Building & Testing
 
-Arbor is designed to prove updates to Trillian's append-only log. The integration surface is Trillian's gRPC Log API:
+Requires Rust 1.94 (set via `rust-toolchain.toml`) with the `riscv64imac-unknown-none-elf` target.
 
-1. Fetch new leaves via `GetLeavesByRange`
-2. Package leaf data + current frontier into `AppendInput`
-3. Generate Jolt proof via the guest program
-4. Clients verify the proof instead of replaying log operations
+```bash
+# Unit tests (fast, native execution)
+cargo test -p arbor-core
+cargo test -p arbor-host --lib
+cargo test -p arbor-trillian --lib
 
-The `LogProver` maintains the compact range state between batches, so sequential proofs chain together: each batch's `old_root` matches the previous batch's `new_root`.
+# End-to-end Jolt prove/verify (compiles guest for RISC-V, ~16s)
+cargo test --release -p arbor-host --test prove_verify -- --nocapture
+```
+
+### With local Trillian
+
+```bash
+# Start Trillian (MySQL + log server + signer)
+cd docker && docker compose up -d
+
+# Sync test (verifies RFC 6962 root compatibility)
+cargo test -p arbor-trillian --test integration -- --ignored --nocapture
+
+# Full pipeline: Trillian sync → Jolt proof → verify (~16s)
+cargo test --release -p arbor-host --test trillian_prove -- --ignored --nocapture
+
+# Tear down
+cd docker && docker compose down
+```

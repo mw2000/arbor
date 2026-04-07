@@ -1,7 +1,7 @@
 // Force linker to include jolt-inlines-sha2 inventory registrations.
 extern crate jolt_inlines_sha2;
 
-use arbor_smt::CompactRange;
+use arbor_core::CompactRange;
 use guest::AppendInput;
 
 /// Host-side log prover. Maintains the compact range (frontier)
@@ -17,7 +17,7 @@ impl LogProver {
         }
     }
 
-    pub fn root(&self) -> arbor_smt::Hash {
+    pub fn root(&self) -> arbor_core::Hash {
         self.compact_range.root()
     }
 
@@ -53,7 +53,7 @@ impl Default for LogProver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arbor_smt::empty_tree_root;
+    use arbor_core::empty_tree_root;
     use guest::prove_append;
 
     #[test]
