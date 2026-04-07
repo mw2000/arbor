@@ -2,6 +2,7 @@
 extern crate jolt_inlines_sha2;
 
 use arbor_core::CompactRange;
+use arbor_host::{create_append_proof, deserialize_jolt_proof, serialize_jolt_proof};
 use guest::AppendInput;
 
 #[test]
@@ -32,13 +33,42 @@ fn prove_and_verify_append() {
     let prove = guest::build_prover_prove_append(program, prover_preprocessing);
     let verify = guest::build_verifier_prove_append(verifier_preprocessing);
 
-    let verify_input = append_input.clone();
-    let (output, proof, io_device) = prove(append_input);
+    let (output, proof, io_device) = prove(append_input.clone());
 
     assert_eq!(output.new_root, cr.root());
     assert_eq!(output.old_size, 0);
     assert_eq!(output.new_size, 3);
 
-    let is_valid = verify(verify_input, output, io_device.panic, proof);
+    // -- Test proof serialization round-trip --
+
+    // Serialize the Jolt proof to bytes.
+    let proof_bytes = serialize_jolt_proof(&proof).expect("serialize failed");
+    println!("serialized Jolt proof: {} bytes", proof_bytes.len());
+    assert!(!proof_bytes.is_empty());
+
+    // -- Test AppendProof bundle --
+
+    let append_proof = create_append_proof(append_input.clone(), output.clone(), &proof)
+        .expect("create_append_proof failed");
+    assert_eq!(append_proof.old_size(), 0);
+    assert_eq!(append_proof.new_size(), 3);
+    assert_eq!(*append_proof.new_root(), cr.root());
+    assert_eq!(append_proof.proof_bytes.len(), proof_bytes.len());
+
+    // Verify the original proof directly.
+    let is_valid = verify(append_input.clone(), output.clone(), io_device.panic, proof);
     assert!(is_valid, "proof verification failed");
+
+    // Deserialize from the AppendProof bundle and re-verify.
+    let proof_roundtrip =
+        deserialize_jolt_proof(&append_proof.proof_bytes).expect("deserialize failed");
+    let is_valid_roundtrip = verify(
+        append_proof.input,
+        append_proof.output,
+        false,
+        proof_roundtrip,
+    );
+    assert!(is_valid_roundtrip, "round-trip proof verification failed");
+
+    println!("all serialization tests passed!");
 }

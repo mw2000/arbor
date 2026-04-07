@@ -2,7 +2,8 @@
 extern crate jolt_inlines_sha2;
 
 pub use arbor_trillian::{SyncResult, SyncerError, TrillianSyncer};
-use guest::AppendInput;
+pub use guest::{AppendInput, AppendOutput, AppendProof};
+use jolt_sdk::{RV64IMACProof, Serializable};
 
 /// Host-side log prover. Wraps a `TrillianSyncer` to sync leaves from
 /// a Trillian log and prepare inputs for the Jolt guest prover.
@@ -71,6 +72,41 @@ impl LogProver {
     pub fn syncer_mut(&mut self) -> &mut TrillianSyncer {
         &mut self.syncer
     }
+}
+
+/// Serialize a Jolt `RV64IMACProof` into a byte vector.
+///
+/// Uses ark-serialize compressed format via Jolt's `Serializable` trait.
+pub fn serialize_jolt_proof(proof: &RV64IMACProof) -> Result<Vec<u8>, String> {
+    proof
+        .serialize_to_bytes()
+        .map_err(|e| format!("failed to serialize Jolt proof: {e}"))
+}
+
+/// Deserialize a Jolt `RV64IMACProof` from bytes.
+///
+/// The bytes must have been produced by [`serialize_jolt_proof`] (ark-serialize compressed).
+pub fn deserialize_jolt_proof(bytes: &[u8]) -> Result<RV64IMACProof, String> {
+    RV64IMACProof::deserialize_from_bytes(bytes)
+        .map_err(|e| format!("failed to deserialize Jolt proof: {e}"))
+}
+
+/// Create an `AppendProof` from the output of a Jolt prove call.
+///
+/// This is the bridge between the raw Jolt prove result and the
+/// serializable `AppendProof` bundle:
+///
+/// ```ignore
+/// let (output, jolt_proof, _io_device) = prove(input.clone());
+/// let append_proof = create_append_proof(input, output, &jolt_proof)?;
+/// ```
+pub fn create_append_proof(
+    input: AppendInput,
+    output: AppendOutput,
+    jolt_proof: &RV64IMACProof,
+) -> Result<AppendProof, String> {
+    let proof_bytes = serialize_jolt_proof(jolt_proof)?;
+    Ok(AppendProof::new(input, output, proof_bytes))
 }
 
 #[cfg(test)]
