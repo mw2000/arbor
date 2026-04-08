@@ -50,9 +50,13 @@ test-core:
 # Examples
 # --------------------------------------------------------------------------
 
-# Run an example (e.g., just example bank-ledger)
+compose := "docker compose -f etc/docker/docker-compose.examples.yml"
+
+# Run an example with full stack lifecycle (e.g., just example bank-ledger)
 example name:
-    cargo run --example {{name}}
+    {{compose}} down -v
+    {{compose}} up -d --wait
+    cargo run --example {{name}}; {{compose}} down -v
 
 # --------------------------------------------------------------------------
 # CI-style checks (run before pushing)
