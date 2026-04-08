@@ -1,7 +1,10 @@
-//! Proof storage for Arbor.
+//! Proof and job storage for Arbor.
 //!
 //! Provides a [`ProofStore`] trait for persisting ZK append proofs and a
 //! [`SqliteProofStore`] implementation backed by an embedded SQLite database.
+//!
+//! Also provides a [`JobStore`] trait and [`SqliteJobStore`] for the outbox
+//! pattern — decoupling proof requests from the long-running Jolt prover.
 //!
 //! Append proofs are the expensive artifacts (Jolt ZK proofs) worth persisting.
 //! Inclusion and consistency proofs are cheap to fetch from Trillian on demand
@@ -22,8 +25,10 @@
 //! let summaries = store.list()?;
 //! ```
 
+mod job;
 mod sqlite;
 
+pub use job::{JobStatus, JobStore, JobSummary, SqliteJobStore};
 pub use sqlite::SqliteProofStore;
 
 use arbor_core::Hash;
@@ -40,6 +45,9 @@ pub enum StoreError {
 
     #[error("proof not found for old_size={old_size}, new_size={new_size}")]
     NotFound { old_size: u64, new_size: u64 },
+
+    #[error("job not found: {0}")]
+    JobNotFound(String),
 }
 
 /// Summary of a stored proof (without the full proof blob).

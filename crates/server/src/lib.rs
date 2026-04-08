@@ -12,12 +12,13 @@ use std::sync::Arc;
 use arbor_core::proof::{ConsistencyProof, InclusionProof};
 use arbor_core::HASH_BYTES;
 use arbor_host::{AppendInput, AppendOutput, AppendProof, LogProver};
-use arbor_store::ProofStore;
+use arbor_store::{JobStore, ProofStore};
 use arbor_verify::Verifier;
 use jolt_sdk::RV64IMACProof;
 use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
 use tracing::info;
+use uuid::Uuid;
 
 pub mod proto {
     tonic::include_proto!("arbor");
@@ -39,6 +40,8 @@ pub struct ArborService {
     verifier: Arc<Verifier>,
     /// Proof storage backend (stores ZK append proofs).
     store: Arc<dyn ProofStore>,
+    /// Job storage backend (outbox for async proof generation).
+    job_store: Arc<dyn JobStore>,
 }
 
 impl ArborService {
@@ -48,18 +51,41 @@ impl ArborService {
     /// - `verifier`: a preprocessed `Verifier` (owns the Jolt verifier state).
     /// - `jolt_prover`: the Jolt prover closure from `guest::build_prover_prove_append`.
     /// - `store`: proof storage backend (e.g. `SqliteProofStore`).
+    /// - `job_store`: job storage backend for async proof generation (e.g. `SqliteJobStore`).
     pub fn new(
         log_prover: LogProver,
         verifier: Verifier,
         jolt_prover: impl Fn(AppendInput) -> (AppendOutput, RV64IMACProof, jolt_sdk::JoltDevice) + Send + Sync + 'static,
         store: impl ProofStore + 'static,
+        job_store: impl JobStore + 'static,
     ) -> Self {
         Self {
             log_prover: Arc::new(Mutex::new(log_prover)),
             jolt_prover: Arc::new(jolt_prover),
             verifier: Arc::new(verifier),
             store: Arc::new(store),
+            job_store: Arc::new(job_store),
         }
+    }
+
+    /// Get a reference to the job store (for the background worker).
+    pub fn job_store(&self) -> &Arc<dyn JobStore> {
+        &self.job_store
+    }
+
+    /// Get a reference to the proof store (for the background worker).
+    pub fn proof_store(&self) -> &Arc<dyn ProofStore> {
+        &self.store
+    }
+
+    /// Get a reference to the Jolt prover (for the background worker).
+    pub fn jolt_prover(&self) -> &Arc<ProverFn> {
+        &self.jolt_prover
+    }
+
+    /// Get a reference to the log prover (for the background worker).
+    pub fn log_prover(&self) -> &Arc<Mutex<LogProver>> {
+        &self.log_prover
     }
 }
 
@@ -157,6 +183,78 @@ impl Arbor for ArborService {
             new_root: result.new_root.to_vec(),
             old_size: result.old_size,
             new_size: result.new_size,
+        }))
+    }
+
+    async fn submit_append(
+        &self,
+        request: Request<SubmitAppendRequest>,
+    ) -> Result<Response<SubmitAppendResponse>, Status> {
+        let req = request.into_inner();
+        let num_leaves = req.leaves.len();
+        info!(num_leaves, "SubmitAppend");
+
+        let job_id = Uuid::new_v4().to_string();
+
+        // 1. Persist the job to the outbox.
+        self.job_store
+            .create_job(&job_id, &req.leaves)
+            .map_err(|e| Status::internal(format!("failed to create job: {e}")))?;
+
+        // 2. Sync with Trillian and prepare the input (fast relative to proving).
+        let (input, result) = {
+            let mut log_prover = self.log_prover.lock().await;
+            log_prover
+                .sync_and_prepare(req.leaves)
+                .await
+                .map_err(|e| Status::internal(format!("sync_and_prepare failed: {e}")))?
+        };
+
+        // 3. Store the prepared input so the background worker can pick it up.
+        self.job_store
+            .set_job_input(&job_id, &input, result.old_size, result.new_size)
+            .map_err(|e| Status::internal(format!("failed to set job input: {e}")))?;
+
+        info!(job_id = %job_id, num_leaves, old_size = result.old_size, new_size = result.new_size, "SubmitAppend accepted");
+
+        Ok(Response::new(SubmitAppendResponse { job_id }))
+    }
+
+    async fn get_job_status(
+        &self,
+        request: Request<GetJobStatusRequest>,
+    ) -> Result<Response<GetJobStatusResponse>, Status> {
+        let req = request.into_inner();
+
+        let summary = self
+            .job_store
+            .get_job(&req.job_id)
+            .map_err(|e| match &e {
+                arbor_store::StoreError::JobNotFound(_) => Status::not_found(e.to_string()),
+                _ => Status::internal(format!("job store error: {e}")),
+            })?;
+
+        // If completed, fetch the proof from the proof store.
+        let append_proof = if summary.status == arbor_store::JobStatus::Completed {
+            if let (Some(old_size), Some(new_size)) = (summary.old_size, summary.new_size) {
+                match self.store.get(old_size, new_size) {
+                    Ok(proof) => serde_json::to_vec(&proof).ok().unwrap_or_default(),
+                    Err(_) => Vec::new(),
+                }
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
+
+        Ok(Response::new(GetJobStatusResponse {
+            job_id: summary.job_id,
+            status: summary.status.as_str().to_string(),
+            old_size: summary.old_size.unwrap_or(0),
+            new_size: summary.new_size.unwrap_or(0),
+            error: summary.error.unwrap_or_default(),
+            append_proof,
         }))
     }
 

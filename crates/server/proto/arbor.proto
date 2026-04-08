@@ -7,9 +7,18 @@ service Arbor {
   // Queue leaf data to the Trillian log, sync, and return the new tree state.
   rpc QueueLeaves(QueueLeavesRequest) returns (QueueLeavesResponse);
 
-  // Generate a ZK append proof for a batch of leaves.
+  // Generate a ZK append proof for a batch of leaves (synchronous, blocking).
   // Queues the leaves, syncs with Trillian, then runs the Jolt prover.
   rpc ProveAppend(ProveAppendRequest) returns (ProveAppendResponse);
+
+  // Submit leaves for async proof generation (outbox pattern).
+  // Returns a job ID immediately. The proof is generated in the background.
+  // Poll with GetJobStatus to check progress and retrieve the proof.
+  rpc SubmitAppend(SubmitAppendRequest) returns (SubmitAppendResponse);
+
+  // Check the status of an async proof job.
+  // Returns the current status and, when completed, the proof itself.
+  rpc GetJobStatus(GetJobStatusRequest) returns (GetJobStatusResponse);
 
   // Verify a serialized ZK append proof.
   rpc VerifyAppendProof(VerifyAppendProofRequest) returns (VerifyAppendProofResponse);
@@ -224,4 +233,43 @@ message StoredProofSummary {
 
 message ListStoredProofsResponse {
   repeated StoredProofSummary proofs = 1;
+}
+
+// ---------------------------------------------------------------------------
+// SubmitAppend (async outbox pattern)
+// ---------------------------------------------------------------------------
+
+message SubmitAppendRequest {
+  // Raw leaf data to append and prove.
+  repeated bytes leaves = 1;
+}
+
+message SubmitAppendResponse {
+  // Unique job ID for polling.
+  string job_id = 1;
+}
+
+// ---------------------------------------------------------------------------
+// GetJobStatus
+// ---------------------------------------------------------------------------
+
+message GetJobStatusRequest {
+  // Job ID returned by SubmitAppend.
+  string job_id = 1;
+}
+
+message GetJobStatusResponse {
+  // Job ID.
+  string job_id = 1;
+  // Current status: "pending", "in_progress", "completed", "failed".
+  string status = 2;
+  // Old tree size (set once Trillian sync completes).
+  uint64 old_size = 3;
+  // New tree size (set once Trillian sync completes).
+  uint64 new_size = 4;
+  // Error message (only set when status is "failed").
+  string error = 5;
+  // The serialized AppendProof (only set when status is "completed").
+  // Same format as ProveAppendResponse.append_proof.
+  bytes append_proof = 6;
 }
