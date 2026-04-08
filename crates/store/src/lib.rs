@@ -31,8 +31,7 @@ mod sqlite;
 pub use job::{JobStatus, JobStore, JobSummary, SqliteJobStore};
 pub use sqlite::SqliteProofStore;
 
-use arbor_core::Hash;
-use guest::AppendProof;
+use arbor_core::{AppendProof, Hash};
 
 /// Errors from proof storage operations.
 #[derive(Debug, thiserror::Error)]

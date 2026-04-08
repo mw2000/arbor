@@ -17,10 +17,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use arbor_host::LogProver;
 use arbor_server::proto::arbor_server::ArborServer;
-use arbor_server::ArborService;
+use arbor_server::{create_append_proof, ArborService};
 use arbor_store::{JobStore, ProofStore, SqliteJobStore, SqliteProofStore};
+use arbor_trillian::TrillianSyncer;
 use arbor_verify::Verifier;
 use clap::Parser;
 use tonic::transport::Server;
@@ -99,12 +99,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         endpoint = args.trillian_endpoint,
         "connecting to Trillian..."
     );
-    let prover = if args.create_tree {
-        LogProver::connect_and_create_tree(&args.trillian_endpoint).await?
+    let syncer = if args.create_tree {
+        TrillianSyncer::connect_and_create_tree(&args.trillian_endpoint).await?
     } else {
-        LogProver::connect(&args.trillian_endpoint, args.log_id.unwrap()).await?
+        TrillianSyncer::connect(&args.trillian_endpoint, args.log_id.unwrap()).await?
     };
-    info!(log_id = prover.log_id(), "connected to Trillian log");
+    info!(log_id = syncer.log_id(), "connected to Trillian log");
 
     // 2. Set up Jolt prover + verifier (expensive one-time preprocessing).
     //
@@ -136,7 +136,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("job store ready");
 
     // 5. Build the gRPC service.
-    let service = ArborService::new(prover, verifier, jolt_prover, store, job_store);
+    let service = ArborService::new(syncer, verifier, jolt_prover, store, job_store);
 
     // 6. Spawn the background prover worker.
     let poll_interval = Duration::from_secs(args.worker_poll_interval);
@@ -160,9 +160,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// Type alias for the boxed Jolt prover closure.
 type BoxedProverFn = Box<
     dyn Fn(
-            guest::AppendInput,
+            arbor_core::AppendInput,
         ) -> (
-            guest::AppendOutput,
+            arbor_core::AppendOutput,
             jolt_sdk::RV64IMACProof,
             jolt_sdk::JoltDevice,
         ) + Send
@@ -277,9 +277,9 @@ async fn process_job(
     proof_store: &Arc<dyn ProofStore>,
     jolt_prover: &Arc<
         dyn Fn(
-                guest::AppendInput,
+                arbor_core::AppendInput,
             ) -> (
-                guest::AppendOutput,
+                arbor_core::AppendOutput,
                 jolt_sdk::RV64IMACProof,
                 jolt_sdk::JoltDevice,
             ) + Send
@@ -304,7 +304,7 @@ async fn process_job(
     let result = tokio::task::spawn_blocking(move || {
         info!(job_id = %job_id_owned, "running Jolt prover...");
         let (output, jolt_proof, _io_device) = jolt_prover(input_clone);
-        arbor_host::create_append_proof(input, output, &jolt_proof)
+        create_append_proof(input, output, &jolt_proof)
     })
     .await;
 

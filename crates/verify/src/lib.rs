@@ -33,7 +33,7 @@ extern crate jolt_inlines_sha2;
 
 pub use arbor_core::proof::{ConsistencyProof, InclusionProof};
 pub use arbor_core::Hash;
-pub use guest::{AppendInput, AppendOutput, AppendProof};
+pub use arbor_core::{AppendInput, AppendOutput, AppendProof};
 
 use jolt_sdk::{RV64IMACProof, Serializable};
 

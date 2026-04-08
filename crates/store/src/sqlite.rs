@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use guest::AppendProof;
+use arbor_core::AppendProof;
 use rusqlite::{params, Connection, OptionalExtension};
 use tracing::info;
 
@@ -180,8 +180,7 @@ impl ProofStore for SqliteProofStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arbor_core::Hash;
-    use guest::{AppendInput, AppendOutput, AppendProof};
+    use arbor_core::{AppendInput, AppendOutput, AppendProof, Hash};
 
     fn make_proof(old_size: u64, new_size: u64) -> AppendProof {
         let old_root: Hash = [old_size as u8; 32];

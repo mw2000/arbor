@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 arbor-core = { path = "../core" }
-arbor-host = { path = "../host" }
+arbor-trillian = { path = "../trillian" }
 arbor-store = { path = "../store" }
 arbor-verify = { path = "../verify" }
 jolt-sdk = { workspace = true, features = ["host"] }
@@ -16,6 +16,11 @@ tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+guest = { package = "arbor-guest", path = "../guest" }
+jolt-inlines-sha2 = { workspace = true, features = ["host"] }
+tracing-subscriber = "0.3"
 
 [build-dependencies]
 tonic-build = "0.12"

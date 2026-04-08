@@ -1,20 +1,20 @@
 //! Arbor gRPC server — transparency log with ZK append proofs.
 //!
-//! Wraps the Arbor library crates (`arbor-host`, `arbor-verify`, `arbor-core`)
+//! Wraps the Arbor library crates (`arbor-trillian`, `arbor-verify`, `arbor-core`)
 //! behind a tonic gRPC service. The server connects to a Trillian log backend
 //! for storage and sequencing, and uses Jolt zkVM for append proofs.
 
-// Force linker to include jolt-inlines-sha2 inventory registrations (via arbor-host).
+// Force linker to include jolt-inlines-sha2 inventory registrations.
 extern crate arbor_verify;
 
 use std::sync::Arc;
 
 use arbor_core::proof::{ConsistencyProof, InclusionProof};
-use arbor_core::HASH_BYTES;
-use arbor_host::{AppendInput, AppendOutput, AppendProof, LogProver};
+use arbor_core::{AppendInput, AppendOutput, AppendProof, HASH_BYTES};
 use arbor_store::{JobStore, ProofStore};
+use arbor_trillian::TrillianSyncer;
 use arbor_verify::Verifier;
-use jolt_sdk::RV64IMACProof;
+use jolt_sdk::{RV64IMACProof, Serializable};
 use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
 use tracing::info;
@@ -31,10 +31,24 @@ use proto::*;
 type ProverFn =
     dyn Fn(AppendInput) -> (AppendOutput, RV64IMACProof, jolt_sdk::JoltDevice) + Send + Sync;
 
+/// Create an `AppendProof` from the output of a Jolt prove call.
+///
+/// Bridges the raw Jolt prove result and the serializable `AppendProof` bundle.
+pub fn create_append_proof(
+    input: AppendInput,
+    output: AppendOutput,
+    jolt_proof: &RV64IMACProof,
+) -> Result<AppendProof, String> {
+    let proof_bytes = jolt_proof
+        .serialize_to_bytes()
+        .map_err(|e| format!("failed to serialize Jolt proof: {e}"))?;
+    Ok(AppendProof::new(input, output, proof_bytes))
+}
+
 /// Shared server state.
 pub struct ArborService {
-    /// The log prover handles Trillian sync + preparing inputs.
-    log_prover: Arc<Mutex<LogProver>>,
+    /// The Trillian syncer handles leaf queuing, syncing, and proof fetching.
+    syncer: Arc<Mutex<TrillianSyncer>>,
     /// The Jolt prover closure (expensive one-time setup).
     jolt_prover: Arc<ProverFn>,
     /// The verifier handles ZK proof verification (expensive one-time setup).
@@ -48,13 +62,13 @@ pub struct ArborService {
 impl ArborService {
     /// Create a new `ArborService`.
     ///
-    /// - `log_prover`: a connected `LogProver` (owns the Trillian connection).
+    /// - `syncer`: a connected `TrillianSyncer` (owns the Trillian connection).
     /// - `verifier`: a preprocessed `Verifier` (owns the Jolt verifier state).
     /// - `jolt_prover`: the Jolt prover closure from `guest::build_prover_prove_append`.
     /// - `store`: proof storage backend (e.g. `SqliteProofStore`).
     /// - `job_store`: job storage backend for async proof generation (e.g. `SqliteJobStore`).
     pub fn new(
-        log_prover: LogProver,
+        syncer: TrillianSyncer,
         verifier: Verifier,
         jolt_prover: impl Fn(AppendInput) -> (AppendOutput, RV64IMACProof, jolt_sdk::JoltDevice)
             + Send
@@ -64,7 +78,7 @@ impl ArborService {
         job_store: impl JobStore + 'static,
     ) -> Self {
         Self {
-            log_prover: Arc::new(Mutex::new(log_prover)),
+            syncer: Arc::new(Mutex::new(syncer)),
             jolt_prover: Arc::new(jolt_prover),
             verifier: Arc::new(verifier),
             store: Arc::new(store),
@@ -87,9 +101,9 @@ impl ArborService {
         &self.jolt_prover
     }
 
-    /// Get a reference to the log prover (for the background worker).
-    pub fn log_prover(&self) -> &Arc<Mutex<LogProver>> {
-        &self.log_prover
+    /// Get a reference to the syncer (for the background worker).
+    pub fn syncer(&self) -> &Arc<Mutex<TrillianSyncer>> {
+        &self.syncer
     }
 }
 
@@ -124,11 +138,11 @@ impl Arbor for ArborService {
         let req = request.into_inner();
         info!(num_leaves = req.leaves.len(), "QueueLeaves");
 
-        let mut log_prover = self.log_prover.lock().await;
-        let (_input, result) = log_prover
-            .sync_and_prepare(req.leaves)
+        let mut syncer = self.syncer.lock().await;
+        let result = syncer
+            .queue_and_sync(req.leaves)
             .await
-            .map_err(|e| Status::internal(format!("sync_and_prepare failed: {e}")))?;
+            .map_err(|e| Status::internal(format!("queue_and_sync failed: {e}")))?;
 
         Ok(Response::new(QueueLeavesResponse {
             root: result.new_root.to_vec(),
@@ -146,11 +160,13 @@ impl Arbor for ArborService {
 
         // 1. Queue leaves and sync with Trillian.
         let (input, result) = {
-            let mut log_prover = self.log_prover.lock().await;
-            log_prover
-                .sync_and_prepare(req.leaves)
+            let mut syncer = self.syncer.lock().await;
+            let result = syncer
+                .queue_and_sync(req.leaves)
                 .await
-                .map_err(|e| Status::internal(format!("sync_and_prepare failed: {e}")))?
+                .map_err(|e| Status::internal(format!("queue_and_sync failed: {e}")))?;
+            let input = result.to_append_input();
+            (input, result)
         };
 
         // 2. Run the Jolt prover (CPU-intensive, runs outside the lock).
@@ -159,7 +175,7 @@ impl Arbor for ArborService {
         let input_clone = input.clone();
         let append_proof = tokio::task::spawn_blocking(move || {
             let (output, jolt_proof, _io_device) = jolt_prover(input_clone);
-            arbor_host::create_append_proof(input, output, &jolt_proof)
+            create_append_proof(input, output, &jolt_proof)
         })
         .await
         .map_err(|e| Status::internal(format!("prover task panicked: {e}")))?
@@ -207,11 +223,13 @@ impl Arbor for ArborService {
 
         // 2. Sync with Trillian and prepare the input (fast relative to proving).
         let (input, result) = {
-            let mut log_prover = self.log_prover.lock().await;
-            log_prover
-                .sync_and_prepare(req.leaves)
+            let mut syncer = self.syncer.lock().await;
+            let result = syncer
+                .queue_and_sync(req.leaves)
                 .await
-                .map_err(|e| Status::internal(format!("sync_and_prepare failed: {e}")))?
+                .map_err(|e| Status::internal(format!("queue_and_sync failed: {e}")))?;
+            let input = result.to_append_input();
+            (input, result)
         };
 
         // 3. Store the prepared input so the background worker can pick it up.
@@ -304,9 +322,8 @@ impl Arbor for ArborService {
             "GetInclusionProof"
         );
 
-        let mut log_prover = self.log_prover.lock().await;
-        let proof = log_prover
-            .syncer_mut()
+        let mut syncer = self.syncer.lock().await;
+        let proof = syncer
             .get_inclusion_proof(req.leaf_index, req.tree_size)
             .await
             .map_err(|e| Status::internal(format!("get_inclusion_proof failed: {e}")))?;
@@ -355,9 +372,8 @@ impl Arbor for ArborService {
             "GetConsistencyProof"
         );
 
-        let mut log_prover = self.log_prover.lock().await;
-        let proof = log_prover
-            .syncer_mut()
+        let mut syncer = self.syncer.lock().await;
+        let proof = syncer
             .get_consistency_proof(req.first_tree_size, req.second_tree_size)
             .await
             .map_err(|e| Status::internal(format!("get_consistency_proof failed: {e}")))?;
@@ -399,9 +415,9 @@ impl Arbor for ArborService {
         &self,
         _request: Request<GetTreeStateRequest>,
     ) -> Result<Response<GetTreeStateResponse>, Status> {
-        let log_prover = self.log_prover.lock().await;
-        let root = log_prover.root();
-        let tree_size = log_prover.size();
+        let syncer = self.syncer.lock().await;
+        let root = syncer.local_root();
+        let tree_size = syncer.local_size();
 
         info!(tree_size, "GetTreeState");
 

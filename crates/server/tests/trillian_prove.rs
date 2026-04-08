@@ -4,11 +4,11 @@
 //!   cd docker && docker compose up -d
 //!
 //! Run (must be release mode for reasonable proving time):
-//!   cargo nextest run --release -p arbor-host --test trillian_prove --run-ignored ignored-only --no-capture
+//!   cargo nextest run --release -p arbor-server --test trillian_prove --run-ignored ignored-only --no-capture
 
-extern crate jolt_inlines_sha2;
+extern crate arbor_verify;
 
-use arbor_host::LogProver;
+use arbor_trillian::TrillianSyncer;
 
 #[tokio::test]
 #[ignore = "requires local Trillian (docker compose up) and --release"]
@@ -16,20 +16,21 @@ async fn trillian_prove_and_verify() {
     tracing_subscriber::fmt::init();
 
     // --- 1. Connect to Trillian and sync leaves ---
-    let mut prover = LogProver::connect_and_create_tree("http://localhost:8090")
+    let mut syncer = TrillianSyncer::connect_and_create_tree("http://localhost:8090")
         .await
         .expect("failed to connect to Trillian");
 
-    println!("created Trillian log tree (id={})", prover.log_id());
+    println!("created Trillian log tree (id={})", syncer.log_id());
 
     let leaves: Vec<Vec<u8>> = (0..3u8)
         .map(|i| format!("trillian-leaf-{i}").into_bytes())
         .collect();
 
-    let (append_input, result) = prover
-        .sync_and_prepare(leaves)
+    let result = syncer
+        .queue_and_sync(leaves)
         .await
-        .expect("sync_and_prepare failed");
+        .expect("queue_and_sync failed");
+    let append_input = result.to_append_input();
 
     println!(
         "synced {} leaves: old_root={}, new_root={}",

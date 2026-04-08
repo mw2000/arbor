@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use guest::AppendInput;
+use arbor_core::AppendInput;
 use rusqlite::{params, Connection, OptionalExtension};
 use tracing::info;
 

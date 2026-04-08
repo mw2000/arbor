@@ -14,7 +14,7 @@ use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criteri
 use arbor_core::proof::{ConsistencyProof, InclusionProof};
 use arbor_core::{hash_node, hash_rfc6962_leaf, CompactRange, Hash};
 use arbor_store::SqliteProofStore;
-use guest::{AppendInput, AppendOutput, AppendProof};
+use arbor_core::{AppendInput, AppendOutput, AppendProof};
 
 // ---------------------------------------------------------------------------
 // Proof generation helpers (mirrors the test helpers in arbor-core)

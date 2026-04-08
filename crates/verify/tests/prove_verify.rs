@@ -1,9 +1,8 @@
 // Force linker to include jolt-inlines-sha2's inventory registrations.
 extern crate jolt_inlines_sha2;
 
-use arbor_core::CompactRange;
-use arbor_host::{create_append_proof, deserialize_jolt_proof, serialize_jolt_proof};
-use guest::AppendInput;
+use arbor_core::{AppendInput, AppendProof, CompactRange};
+use jolt_sdk::Serializable;
 
 #[test]
 fn prove_and_verify_append() {
@@ -41,15 +40,13 @@ fn prove_and_verify_append() {
 
     // -- Test proof serialization round-trip --
 
-    // Serialize the Jolt proof to bytes.
-    let proof_bytes = serialize_jolt_proof(&proof).expect("serialize failed");
+    let proof_bytes = proof.serialize_to_bytes().expect("serialize failed");
     println!("serialized Jolt proof: {} bytes", proof_bytes.len());
     assert!(!proof_bytes.is_empty());
 
     // -- Test AppendProof bundle --
 
-    let append_proof = create_append_proof(append_input.clone(), output.clone(), &proof)
-        .expect("create_append_proof failed");
+    let append_proof = AppendProof::new(append_input.clone(), output.clone(), proof_bytes.clone());
     assert_eq!(append_proof.old_size(), 0);
     assert_eq!(append_proof.new_size(), 3);
     assert_eq!(*append_proof.new_root(), cr.root());
@@ -60,8 +57,8 @@ fn prove_and_verify_append() {
     assert!(is_valid, "proof verification failed");
 
     // Deserialize from the AppendProof bundle and re-verify.
-    let proof_roundtrip =
-        deserialize_jolt_proof(&append_proof.proof_bytes).expect("deserialize failed");
+    let proof_roundtrip = jolt_sdk::RV64IMACProof::deserialize_from_bytes(&append_proof.proof_bytes)
+        .expect("deserialize failed");
     let is_valid_roundtrip = verify(
         append_proof.input,
         append_proof.output,

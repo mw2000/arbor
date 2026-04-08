@@ -8,8 +8,9 @@ name = "arbor-service-bin"
 path = "src/main.rs"
 
 [dependencies]
+arbor-core = { path = "../../crates/core" }
 arbor-server = { path = "../../crates/server" }
-arbor-host = { path = "../../crates/host" }
+arbor-trillian = { path = "../../crates/trillian" }
 arbor-store = { path = "../../crates/store" }
 arbor-verify = { path = "../../crates/verify" }
 guest = { package = "arbor-guest", path = "../../crates/guest" }

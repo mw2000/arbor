@@ -457,3 +457,14 @@ pub struct SyncResult {
     pub new_size: u64,
     pub leaf_values: Vec<Vec<u8>>,
 }
+
+impl SyncResult {
+    /// Build the guest prover's `AppendInput` from this sync result.
+    pub fn to_append_input(&self) -> arbor_core::AppendInput {
+        arbor_core::AppendInput {
+            frontier: self.old_frontier.clone(),
+            tree_size: self.old_size,
+            new_leaves: self.leaf_values.clone(),
+        }
+    }
+}
