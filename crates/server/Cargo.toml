@@ -1,0 +1,26 @@
+[package]
+name = "arbor-server"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "arbor-server"
+path = "src/main.rs"
+
+[dependencies]
+arbor-core = { path = "../core" }
+guest = { package = "arbor-guest", path = "../guest" }
+arbor-host = { path = "../host" }
+arbor-verify = { path = "../verify" }
+jolt-sdk = { workspace = true, features = ["host"] }
+
+tonic = "0.12"
+prost = "0.13"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4", features = ["derive"] }
+serde_json = "1"
+
+[build-dependencies]
+tonic-build = "0.12"

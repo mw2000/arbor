@@ -1,0 +1,179 @@
+syntax = "proto3";
+
+package arbor;
+
+// Arbor gRPC service — transparency log with ZK append proofs.
+service Arbor {
+  // Queue leaf data to the Trillian log, sync, and return the new tree state.
+  rpc QueueLeaves(QueueLeavesRequest) returns (QueueLeavesResponse);
+
+  // Generate a ZK append proof for a batch of leaves.
+  // Queues the leaves, syncs with Trillian, then runs the Jolt prover.
+  rpc ProveAppend(ProveAppendRequest) returns (ProveAppendResponse);
+
+  // Verify a serialized ZK append proof.
+  rpc VerifyAppendProof(VerifyAppendProofRequest) returns (VerifyAppendProofResponse);
+
+  // Fetch a Merkle inclusion proof from Trillian.
+  rpc GetInclusionProof(GetInclusionProofRequest) returns (GetInclusionProofResponse);
+
+  // Verify a Merkle inclusion proof.
+  rpc VerifyInclusionProof(VerifyInclusionProofRequest) returns (VerifyInclusionProofResponse);
+
+  // Fetch a Merkle consistency proof from Trillian.
+  rpc GetConsistencyProof(GetConsistencyProofRequest) returns (GetConsistencyProofResponse);
+
+  // Verify a Merkle consistency proof.
+  rpc VerifyConsistencyProof(VerifyConsistencyProofRequest) returns (VerifyConsistencyProofResponse);
+
+  // Get the current tree state (root hash and size).
+  rpc GetTreeState(GetTreeStateRequest) returns (GetTreeStateResponse);
+}
+
+// ---------------------------------------------------------------------------
+// QueueLeaves
+// ---------------------------------------------------------------------------
+
+message QueueLeavesRequest {
+  // Raw leaf data to queue.
+  repeated bytes leaves = 1;
+}
+
+message QueueLeavesResponse {
+  // Root hash after syncing.
+  bytes root = 1;
+  // Tree size after syncing.
+  uint64 tree_size = 2;
+}
+
+// ---------------------------------------------------------------------------
+// ProveAppend
+// ---------------------------------------------------------------------------
+
+message ProveAppendRequest {
+  // Raw leaf data to append and prove.
+  repeated bytes leaves = 1;
+}
+
+message ProveAppendResponse {
+  // The serialized AppendProof (serde JSON or bincode).
+  bytes append_proof = 1;
+  // Old root before the append.
+  bytes old_root = 2;
+  // New root after the append.
+  bytes new_root = 3;
+  // Old tree size.
+  uint64 old_size = 4;
+  // New tree size.
+  uint64 new_size = 5;
+}
+
+// ---------------------------------------------------------------------------
+// VerifyAppendProof
+// ---------------------------------------------------------------------------
+
+message VerifyAppendProofRequest {
+  // Serialized AppendProof (same format as ProveAppendResponse.append_proof).
+  bytes append_proof = 1;
+}
+
+message VerifyAppendProofResponse {
+  // Whether the proof is valid.
+  bool valid = 1;
+  // Old root the proof claims.
+  bytes old_root = 2;
+  // New root the proof claims.
+  bytes new_root = 3;
+  // Old tree size.
+  uint64 old_size = 4;
+  // New tree size.
+  uint64 new_size = 5;
+}
+
+// ---------------------------------------------------------------------------
+// GetInclusionProof
+// ---------------------------------------------------------------------------
+
+message GetInclusionProofRequest {
+  // 0-based leaf index.
+  uint64 leaf_index = 1;
+  // Tree size the proof is relative to.
+  uint64 tree_size = 2;
+}
+
+message GetInclusionProofResponse {
+  // Leaf index.
+  uint64 leaf_index = 1;
+  // Tree size.
+  uint64 tree_size = 2;
+  // Sibling hashes from leaf to root (bottom-up), each 32 bytes.
+  repeated bytes hashes = 3;
+}
+
+// ---------------------------------------------------------------------------
+// VerifyInclusionProof
+// ---------------------------------------------------------------------------
+
+message VerifyInclusionProofRequest {
+  // 0-based leaf index.
+  uint64 leaf_index = 1;
+  // Tree size.
+  uint64 tree_size = 2;
+  // Sibling hashes (bottom-up), each 32 bytes.
+  repeated bytes hashes = 3;
+  // RFC 6962 leaf hash (SHA256(0x00 || data)), 32 bytes.
+  bytes leaf_hash = 4;
+  // Expected root hash, 32 bytes.
+  bytes expected_root = 5;
+}
+
+message VerifyInclusionProofResponse {
+  bool valid = 1;
+}
+
+// ---------------------------------------------------------------------------
+// GetConsistencyProof
+// ---------------------------------------------------------------------------
+
+message GetConsistencyProofRequest {
+  // Size of the older tree.
+  uint64 first_tree_size = 1;
+  // Size of the newer tree.
+  uint64 second_tree_size = 2;
+}
+
+message GetConsistencyProofResponse {
+  uint64 old_size = 1;
+  uint64 new_size = 2;
+  // Proof hashes, each 32 bytes.
+  repeated bytes hashes = 3;
+}
+
+// ---------------------------------------------------------------------------
+// VerifyConsistencyProof
+// ---------------------------------------------------------------------------
+
+message VerifyConsistencyProofRequest {
+  uint64 old_size = 1;
+  uint64 new_size = 2;
+  repeated bytes hashes = 3;
+  // Old root hash, 32 bytes.
+  bytes old_root = 4;
+  // New root hash, 32 bytes.
+  bytes new_root = 5;
+}
+
+message VerifyConsistencyProofResponse {
+  bool valid = 1;
+}
+
+// ---------------------------------------------------------------------------
+// GetTreeState
+// ---------------------------------------------------------------------------
+
+message GetTreeStateRequest {}
+
+message GetTreeStateResponse {
+  bytes root = 1;
+  uint64 tree_size = 2;
+}

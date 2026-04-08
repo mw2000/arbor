@@ -169,6 +169,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "arbor-server"
+version = "0.1.0"
+dependencies = [
+ "arbor-core",
+ "arbor-guest",
+ "arbor-host",
+ "arbor-verify",
+ "clap",
+ "jolt-sdk",
+ "prost",
+ "serde_json",
+ "tokio",
+ "tonic",
+ "tonic-build",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "arbor-trillian"
 version = "0.1.0"
 dependencies = [
