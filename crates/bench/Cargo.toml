@@ -1,0 +1,19 @@
+[package]
+name = "arbor-bench"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+arbor-core = { path = "../core" }
+guest = { package = "arbor-guest", path = "../guest" }
+arbor-store = { path = "../store" }
+jolt-sdk = { workspace = true, features = ["host"] }
+jolt-inlines-sha2 = { workspace = true, features = ["host"] }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "arbor"
+harness = false
