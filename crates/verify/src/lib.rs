@@ -62,7 +62,7 @@ pub enum VerifyError {
 /// Reuse the `Verifier` instance for multiple proof verifications.
 pub struct Verifier {
     /// Boxed verify closure from Jolt. Captures the verifier preprocessing.
-    verify_fn: Box<dyn Fn(AppendInput, AppendOutput, bool, RV64IMACProof) -> bool + Send>,
+    verify_fn: Box<dyn Fn(AppendInput, AppendOutput, bool, RV64IMACProof) -> bool + Send + Sync>,
 }
 
 impl Verifier {
@@ -95,6 +95,22 @@ impl Verifier {
         Ok(Self {
             verify_fn: Box::new(verify),
         })
+    }
+
+    /// Create a verifier from a pre-built verify closure.
+    ///
+    /// Use this when the caller has already done Jolt preprocessing (e.g. to
+    /// share the compilation artifacts with a prover). The closure should have
+    /// the same signature as `guest::build_verifier_prove_append` returns.
+    pub fn from_verify_fn(
+        verify_fn: impl Fn(AppendInput, AppendOutput, bool, RV64IMACProof) -> bool
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        Self {
+            verify_fn: Box::new(verify_fn),
+        }
     }
 
     /// Verify a ZK append proof.
