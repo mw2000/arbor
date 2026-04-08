@@ -94,7 +94,10 @@ async fn sync_and_verify_roots() {
         inclusion.verify(&leaf0_hash, &syncer.local_root()),
         "inclusion proof verification failed for leaf 0"
     );
-    println!("inclusion proof for leaf 0 verified (proof len = {})", inclusion.hashes.len());
+    println!(
+        "inclusion proof for leaf 0 verified (proof len = {})",
+        inclusion.hashes.len()
+    );
 
     // Test inclusion proof for a middle leaf.
     let inclusion3 = syncer

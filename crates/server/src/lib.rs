@@ -28,7 +28,8 @@ use proto::arbor_server::Arbor;
 use proto::*;
 
 /// Type alias for the Jolt prover closure.
-type ProverFn = dyn Fn(AppendInput) -> (AppendOutput, RV64IMACProof, jolt_sdk::JoltDevice) + Send + Sync;
+type ProverFn =
+    dyn Fn(AppendInput) -> (AppendOutput, RV64IMACProof, jolt_sdk::JoltDevice) + Send + Sync;
 
 /// Shared server state.
 pub struct ArborService {
@@ -55,7 +56,10 @@ impl ArborService {
     pub fn new(
         log_prover: LogProver,
         verifier: Verifier,
-        jolt_prover: impl Fn(AppendInput) -> (AppendOutput, RV64IMACProof, jolt_sdk::JoltDevice) + Send + Sync + 'static,
+        jolt_prover: impl Fn(AppendInput) -> (AppendOutput, RV64IMACProof, jolt_sdk::JoltDevice)
+            + Send
+            + Sync
+            + 'static,
         store: impl ProofStore + 'static,
         job_store: impl JobStore + 'static,
     ) -> Self {
@@ -226,13 +230,10 @@ impl Arbor for ArborService {
     ) -> Result<Response<GetJobStatusResponse>, Status> {
         let req = request.into_inner();
 
-        let summary = self
-            .job_store
-            .get_job(&req.job_id)
-            .map_err(|e| match &e {
-                arbor_store::StoreError::JobNotFound(_) => Status::not_found(e.to_string()),
-                _ => Status::internal(format!("job store error: {e}")),
-            })?;
+        let summary = self.job_store.get_job(&req.job_id).map_err(|e| match &e {
+            arbor_store::StoreError::JobNotFound(_) => Status::not_found(e.to_string()),
+            _ => Status::internal(format!("job store error: {e}")),
+        })?;
 
         // If completed, fetch the proof from the proof store.
         let append_proof = if summary.status == arbor_store::JobStatus::Completed {
@@ -263,10 +264,7 @@ impl Arbor for ArborService {
         request: Request<VerifyAppendProofRequest>,
     ) -> Result<Response<VerifyAppendProofResponse>, Status> {
         let req = request.into_inner();
-        info!(
-            proof_bytes = req.append_proof.len(),
-            "VerifyAppendProof"
-        );
+        info!(proof_bytes = req.append_proof.len(), "VerifyAppendProof");
 
         // Deserialize the AppendProof bundle.
         let append_proof: AppendProof = serde_json::from_slice(&req.append_proof)
@@ -428,9 +426,7 @@ impl Arbor for ArborService {
             .store
             .get(req.old_size, req.new_size)
             .map_err(|e| match &e {
-                arbor_store::StoreError::NotFound { .. } => {
-                    Status::not_found(e.to_string())
-                }
+                arbor_store::StoreError::NotFound { .. } => Status::not_found(e.to_string()),
                 _ => Status::internal(format!("store error: {e}")),
             })?;
 

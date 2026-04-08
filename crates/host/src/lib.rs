@@ -116,10 +116,7 @@ mod tests {
 
     /// Helper: build an AppendInput directly from leaf data (no Trillian).
     /// Used for fast native-execution unit tests.
-    fn prepare_native(
-        compact_range: &mut CompactRange,
-        new_leaves: Vec<Vec<u8>>,
-    ) -> AppendInput {
+    fn prepare_native(compact_range: &mut CompactRange, new_leaves: Vec<Vec<u8>>) -> AppendInput {
         let input = AppendInput {
             frontier: compact_range.frontier().to_vec(),
             tree_size: compact_range.size(),
