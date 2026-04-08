@@ -48,6 +48,11 @@ services:
     ports:
       - "8090:8090"
       - "8091:8091"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8091/healthz || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
 
   trillian-signer:
     image: gcr.io/trillian-opensource-ci/log_signer
@@ -72,7 +77,7 @@ services:
       - arbor_data:/data
     depends_on:
       trillian-server:
-        condition: service_started
+        condition: service_healthy
       trillian-signer:
         condition: service_started
     command:
