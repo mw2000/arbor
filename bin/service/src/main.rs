@@ -26,7 +26,10 @@ use tonic::transport::Server;
 use tracing::{error, info};
 
 #[derive(Parser, Debug)]
-#[command(name = "arbor-service-bin", about = "Arbor transparency log gRPC server")]
+#[command(
+    name = "arbor-service-bin",
+    about = "Arbor transparency log gRPC server"
+)]
 struct Args {
     /// gRPC listen address.
     #[arg(long, default_value = "[::1]:50051")]
@@ -104,8 +107,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Verifier setup (needs prover generators).
     let verifier_setup = prover_pp.generators.to_verifier_setup();
-    let verifier_pp =
-        guest::preprocess_verifier_prove_append(shared, verifier_setup, None);
+    let verifier_pp = guest::preprocess_verifier_prove_append(shared, verifier_setup, None);
 
     let verify_fn = guest::build_verifier_prove_append(verifier_pp);
     let verifier = Verifier::from_verify_fn(verify_fn);
@@ -118,10 +120,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!(path = args.store_path, "opening proof store...");
     let store = SqliteProofStore::open(&args.store_path)
         .map_err(|e| format!("failed to open proof store: {e}"))?;
-    info!(
-        count = store.count().unwrap_or(0),
-        "proof store ready"
-    );
+    info!(count = store.count().unwrap_or(0), "proof store ready");
 
     // 4. Open the job store.
     info!(path = args.job_store_path, "opening job store...");
@@ -183,9 +182,11 @@ async fn process_job(
     jolt_prover: &Arc<
         dyn Fn(
                 guest::AppendInput,
-            )
-                -> (guest::AppendOutput, jolt_sdk::RV64IMACProof, jolt_sdk::JoltDevice)
-            + Send
+            ) -> (
+                guest::AppendOutput,
+                jolt_sdk::RV64IMACProof,
+                jolt_sdk::JoltDevice,
+            ) + Send
             + Sync,
     >,
 ) {

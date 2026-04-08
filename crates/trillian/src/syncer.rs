@@ -278,10 +278,7 @@ impl TrillianSyncer {
             })
             .await?;
 
-        let proto_proof = resp
-            .into_inner()
-            .proof
-            .ok_or(SyncerError::MissingProof)?;
+        let proto_proof = resp.into_inner().proof.ok_or(SyncerError::MissingProof)?;
 
         let hashes = proto_hashes_to_hashes(&proto_proof.hashes)?;
 
@@ -359,10 +356,7 @@ impl TrillianSyncer {
             })
             .await?;
 
-        let proto_proof = resp
-            .into_inner()
-            .proof
-            .ok_or(SyncerError::MissingProof)?;
+        let proto_proof = resp.into_inner().proof.ok_or(SyncerError::MissingProof)?;
 
         let hashes = proto_hashes_to_hashes(&proto_proof.hashes)?;
 
