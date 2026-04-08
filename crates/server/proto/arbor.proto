@@ -28,6 +28,12 @@ service Arbor {
 
   // Get the current tree state (root hash and size).
   rpc GetTreeState(GetTreeStateRequest) returns (GetTreeStateResponse);
+
+  // Retrieve a stored append proof by its tree size transition.
+  rpc GetStoredProof(GetStoredProofRequest) returns (GetStoredProofResponse);
+
+  // List summaries of all stored append proofs.
+  rpc ListStoredProofs(ListStoredProofsRequest) returns (ListStoredProofsResponse);
 }
 
 // ---------------------------------------------------------------------------
@@ -176,4 +182,46 @@ message GetTreeStateRequest {}
 message GetTreeStateResponse {
   bytes root = 1;
   uint64 tree_size = 2;
+}
+
+// ---------------------------------------------------------------------------
+// GetStoredProof
+// ---------------------------------------------------------------------------
+
+message GetStoredProofRequest {
+  // Old tree size of the transition to look up.
+  uint64 old_size = 1;
+  // New tree size of the transition to look up.
+  uint64 new_size = 2;
+}
+
+message GetStoredProofResponse {
+  // The serialized AppendProof (same format as ProveAppendResponse.append_proof).
+  bytes append_proof = 1;
+  bytes old_root = 2;
+  bytes new_root = 3;
+  uint64 old_size = 4;
+  uint64 new_size = 5;
+}
+
+// ---------------------------------------------------------------------------
+// ListStoredProofs
+// ---------------------------------------------------------------------------
+
+message ListStoredProofsRequest {}
+
+message StoredProofSummary {
+  int64 id = 1;
+  uint64 old_size = 2;
+  uint64 new_size = 3;
+  bytes old_root = 4;
+  bytes new_root = 5;
+  // Size of the serialized proof in bytes.
+  uint64 proof_bytes_len = 6;
+  // Unix timestamp (seconds) when the proof was stored.
+  int64 created_at = 7;
+}
+
+message ListStoredProofsResponse {
+  repeated StoredProofSummary proofs = 1;
 }

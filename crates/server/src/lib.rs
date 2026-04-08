@@ -12,6 +12,7 @@ use std::sync::Arc;
 use arbor_core::proof::{ConsistencyProof, InclusionProof};
 use arbor_core::HASH_BYTES;
 use arbor_host::{AppendInput, AppendOutput, AppendProof, LogProver};
+use arbor_store::ProofStore;
 use arbor_verify::Verifier;
 use jolt_sdk::RV64IMACProof;
 use tokio::sync::Mutex;
@@ -36,6 +37,8 @@ pub struct ArborService {
     jolt_prover: Arc<ProverFn>,
     /// The verifier handles ZK proof verification (expensive one-time setup).
     verifier: Arc<Verifier>,
+    /// Proof storage backend (stores ZK append proofs).
+    store: Arc<dyn ProofStore>,
 }
 
 impl ArborService {
@@ -44,15 +47,18 @@ impl ArborService {
     /// - `log_prover`: a connected `LogProver` (owns the Trillian connection).
     /// - `verifier`: a preprocessed `Verifier` (owns the Jolt verifier state).
     /// - `jolt_prover`: the Jolt prover closure from `guest::build_prover_prove_append`.
+    /// - `store`: proof storage backend (e.g. `SqliteProofStore`).
     pub fn new(
         log_prover: LogProver,
         verifier: Verifier,
         jolt_prover: impl Fn(AppendInput) -> (AppendOutput, RV64IMACProof, jolt_sdk::JoltDevice) + Send + Sync + 'static,
+        store: impl ProofStore + 'static,
     ) -> Self {
         Self {
             log_prover: Arc::new(Mutex::new(log_prover)),
             jolt_prover: Arc::new(jolt_prover),
             verifier: Arc::new(verifier),
+            store: Arc::new(store),
         }
     }
 }
@@ -129,7 +135,12 @@ impl Arbor for ArborService {
         .map_err(|e| Status::internal(format!("prover task panicked: {e}")))?
         .map_err(|e| Status::internal(format!("proof creation failed: {e}")))?;
 
-        // 3. Serialize the AppendProof bundle.
+        // 3. Store the proof.
+        self.store
+            .put(&append_proof)
+            .map_err(|e| Status::internal(format!("proof storage failed: {e}")))?;
+
+        // 4. Serialize the AppendProof bundle for the response.
         let proof_bytes = serde_json::to_vec(&append_proof)
             .map_err(|e| Status::internal(format!("proof serialization failed: {e}")))?;
 
@@ -137,7 +148,7 @@ impl Arbor for ArborService {
             old_size = result.old_size,
             new_size = result.new_size,
             proof_bytes = proof_bytes.len(),
-            "ProveAppend complete"
+            "ProveAppend complete (stored)"
         );
 
         Ok(Response::new(ProveAppendResponse {
@@ -302,5 +313,65 @@ impl Arbor for ArborService {
             root: root.to_vec(),
             tree_size,
         }))
+    }
+
+    async fn get_stored_proof(
+        &self,
+        request: Request<GetStoredProofRequest>,
+    ) -> Result<Response<GetStoredProofResponse>, Status> {
+        let req = request.into_inner();
+        info!(
+            old_size = req.old_size,
+            new_size = req.new_size,
+            "GetStoredProof"
+        );
+
+        let proof = self
+            .store
+            .get(req.old_size, req.new_size)
+            .map_err(|e| match &e {
+                arbor_store::StoreError::NotFound { .. } => {
+                    Status::not_found(e.to_string())
+                }
+                _ => Status::internal(format!("store error: {e}")),
+            })?;
+
+        let proof_bytes = serde_json::to_vec(&proof)
+            .map_err(|e| Status::internal(format!("proof serialization failed: {e}")))?;
+
+        Ok(Response::new(GetStoredProofResponse {
+            append_proof: proof_bytes,
+            old_root: proof.output.old_root.to_vec(),
+            new_root: proof.output.new_root.to_vec(),
+            old_size: proof.output.old_size,
+            new_size: proof.output.new_size,
+        }))
+    }
+
+    async fn list_stored_proofs(
+        &self,
+        _request: Request<ListStoredProofsRequest>,
+    ) -> Result<Response<ListStoredProofsResponse>, Status> {
+        info!("ListStoredProofs");
+
+        let summaries = self
+            .store
+            .list()
+            .map_err(|e| Status::internal(format!("store error: {e}")))?;
+
+        let proofs = summaries
+            .into_iter()
+            .map(|s| StoredProofSummary {
+                id: s.id,
+                old_size: s.old_size,
+                new_size: s.new_size,
+                old_root: s.old_root.to_vec(),
+                new_root: s.new_root.to_vec(),
+                proof_bytes_len: s.proof_bytes_len as u64,
+                created_at: s.created_at,
+            })
+            .collect();
+
+        Ok(Response::new(ListStoredProofsResponse { proofs }))
     }
 }

@@ -15,6 +15,7 @@
 use arbor_host::LogProver;
 use arbor_server::proto::arbor_server::ArborServer;
 use arbor_server::ArborService;
+use arbor_store::{ProofStore, SqliteProofStore};
 use arbor_verify::Verifier;
 use clap::Parser;
 use tonic::transport::Server;
@@ -42,6 +43,10 @@ struct Args {
     /// Directory for caching the compiled Jolt guest binary.
     #[arg(long, default_value = "/tmp/arbor-guest-targets")]
     guest_target_dir: String,
+
+    /// Path to the SQLite proof store database.
+    #[arg(long, default_value = "arbor-proofs.db")]
+    store_path: String,
 }
 
 #[tokio::main]
@@ -97,8 +102,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let jolt_prover = guest::build_prover_prove_append(program, prover_pp);
     info!("Jolt prover and verifier ready");
 
-    // 3. Build the gRPC service.
-    let service = ArborService::new(prover, verifier, jolt_prover);
+    // 3. Open the proof store.
+    info!(path = args.store_path, "opening proof store...");
+    let store = SqliteProofStore::open(&args.store_path)
+        .map_err(|e| format!("failed to open proof store: {e}"))?;
+    info!(
+        count = store.count().unwrap_or(0),
+        "proof store ready"
+    );
+
+    // 4. Build the gRPC service.
+    let service = ArborService::new(prover, verifier, jolt_prover, store);
     let addr = args.listen.parse()?;
 
     info!(%addr, "starting Arbor gRPC server");

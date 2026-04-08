@@ -11,6 +11,7 @@ path = "src/main.rs"
 arbor-core = { path = "../core" }
 guest = { package = "arbor-guest", path = "../guest" }
 arbor-host = { path = "../host" }
+arbor-store = { path = "../store" }
 arbor-verify = { path = "../verify" }
 jolt-sdk = { workspace = true, features = ["host"] }
 
