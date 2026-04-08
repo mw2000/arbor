@@ -94,6 +94,8 @@ services:
       - /data/arbor-proofs.db
       - --job-store-path
       - /data/arbor-jobs.db
+      - --precompiled-elf
+      - /opt/arbor/guest-elf
 
 volumes:
   mysql_data:
