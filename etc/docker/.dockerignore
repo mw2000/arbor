@@ -1,0 +1,22 @@
+# Build artifacts
+target/
+
+# Git
+.git/
+.gitignore
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Docker
+etc/docker/
+
+# Data files
+*.db
+
+# OS
+.DS_Store
+Thumbs.db

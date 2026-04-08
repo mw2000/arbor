@@ -163,6 +163,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "arbor-examples"
+version = "0.1.0"
+dependencies = [
+ "arbor-server",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tonic",
+]
+
+[[package]]
 name = "arbor-guest"
 version = "0.1.0"
 dependencies = [
