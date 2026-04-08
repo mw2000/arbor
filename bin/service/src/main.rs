@@ -13,6 +13,7 @@
 //! arbor-service-bin --trillian-endpoint http://localhost:8090 --create-tree
 //! ```
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -48,8 +49,21 @@ struct Args {
     create_tree: bool,
 
     /// Directory for caching the compiled Jolt guest binary.
+    /// Used when --precompiled-elf is not set (local development).
     #[arg(long, default_value = "/tmp/arbor-guest-targets")]
     guest_target_dir: String,
+
+    /// Path to a directory containing pre-compiled guest ELF files.
+    ///
+    /// When set, the server loads the guest program from pre-built ELF files
+    /// instead of invoking the `jolt` CLI at startup. This is the recommended
+    /// mode for Docker / production deployments.
+    ///
+    /// Expected files inside the directory:
+    ///   - `guest.elf`          – the main guest ELF
+    ///   - `guest-advice.elf`   – the compute-advice variant (optional)
+    #[arg(long)]
+    precompiled_elf: Option<PathBuf>,
 
     /// Path to the SQLite proof store database.
     #[arg(long, default_value = "arbor-proofs.db")]
@@ -93,27 +107,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!(log_id = prover.log_id(), "connected to Trillian log");
 
     // 2. Set up Jolt prover + verifier (expensive one-time preprocessing).
-    info!(
-        target_dir = args.guest_target_dir,
-        "compiling guest program and running Jolt preprocessing (this may take a while)..."
-    );
-
-    let mut program = guest::compile_prove_append(&args.guest_target_dir);
-    let shared = guest::preprocess_shared_prove_append(&mut program)
-        .map_err(|e| format!("shared preprocessing failed: {e}"))?;
-
-    // Prover setup.
-    let prover_pp = guest::preprocess_prover_prove_append(shared.clone());
-
-    // Verifier setup (needs prover generators).
-    let verifier_setup = prover_pp.generators.to_verifier_setup();
-    let verifier_pp = guest::preprocess_verifier_prove_append(shared, verifier_setup, None);
-
-    let verify_fn = guest::build_verifier_prove_append(verifier_pp);
-    let verifier = Verifier::from_verify_fn(verify_fn);
-
-    // Build the prover closure.
-    let jolt_prover = guest::build_prover_prove_append(program, prover_pp);
+    //
+    // Two modes:
+    //   a) --precompiled-elf <dir>  →  load pre-built ELF files (Docker / prod)
+    //   b) default                  →  compile guest via `jolt` CLI (local dev)
+    let (jolt_prover, verifier) = if let Some(ref elf_dir) = args.precompiled_elf {
+        info!(?elf_dir, "loading pre-compiled guest ELF...");
+        build_from_precompiled_elf(elf_dir)?
+    } else {
+        info!(
+            target_dir = args.guest_target_dir,
+            "compiling guest program via jolt CLI (this may take a while)..."
+        );
+        build_from_jolt_compile(&args.guest_target_dir)?
+    };
     info!("Jolt prover and verifier ready");
 
     // 3. Open the proof store.
@@ -145,6 +152,95 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Jolt guest program loading
+// ---------------------------------------------------------------------------
+
+/// Type alias for the boxed Jolt prover closure.
+type BoxedProverFn = Box<
+    dyn Fn(
+            guest::AppendInput,
+        ) -> (
+            guest::AppendOutput,
+            jolt_sdk::RV64IMACProof,
+            jolt_sdk::JoltDevice,
+        ) + Send
+        + Sync,
+>;
+
+/// Load pre-compiled guest ELF files from `elf_dir` and build the prover +
+/// verifier without needing the `jolt` CLI at runtime.
+///
+/// Expected files:
+///   - `<elf_dir>/guest.elf`          – main guest binary
+///   - `<elf_dir>/guest-advice.elf`   – compute-advice variant (optional)
+fn build_from_precompiled_elf(
+    elf_dir: &std::path::Path,
+) -> Result<(BoxedProverFn, Verifier), Box<dyn std::error::Error>> {
+    let elf_path = elf_dir.join("guest.elf");
+    let advice_path = elf_dir.join("guest-advice.elf");
+
+    let elf_bytes = std::fs::read(&elf_path)
+        .map_err(|e| format!("failed to read {}: {e}", elf_path.display()))?;
+    info!(path = %elf_path.display(), bytes = elf_bytes.len(), "loaded guest ELF");
+
+    let memory_config = guest::memory_config_prove_append();
+
+    let mut program = if advice_path.exists() {
+        let advice_bytes = std::fs::read(&advice_path)
+            .map_err(|e| format!("failed to read {}: {e}", advice_path.display()))?;
+        info!(path = %advice_path.display(), bytes = advice_bytes.len(), "loaded compute-advice ELF");
+        jolt_sdk::guest::program::Program::new_with_advice(
+            &elf_bytes,
+            &advice_bytes,
+            &memory_config,
+        )
+    } else {
+        info!("no compute-advice ELF found, proceeding without it");
+        jolt_sdk::guest::program::Program::new(&elf_bytes, &memory_config)
+    };
+
+    let shared = guest::preprocess_shared_prove_append(&mut program)
+        .map_err(|e| format!("shared preprocessing failed: {e}"))?;
+
+    let prover_pp = guest::preprocess_prover_prove_append(shared.clone());
+
+    let verifier_setup = prover_pp.generators.to_verifier_setup();
+    let verifier_pp = guest::preprocess_verifier_prove_append(shared, verifier_setup, None);
+    let verify_fn = guest::build_verifier_prove_append(verifier_pp);
+    let verifier = Verifier::from_verify_fn(verify_fn);
+
+    let jolt_prover: BoxedProverFn = Box::new(guest::build_prover_prove_append(program, prover_pp));
+
+    Ok((jolt_prover, verifier))
+}
+
+/// Compile the guest program via the `jolt` CLI and build the prover + verifier.
+/// This is the original flow used for local development.
+fn build_from_jolt_compile(
+    target_dir: &str,
+) -> Result<(BoxedProverFn, Verifier), Box<dyn std::error::Error>> {
+    let mut program = guest::compile_prove_append(target_dir);
+
+    let shared = guest::preprocess_shared_prove_append(&mut program)
+        .map_err(|e| format!("shared preprocessing failed: {e}"))?;
+
+    let prover_pp = guest::preprocess_prover_prove_append(shared.clone());
+
+    let verifier_setup = prover_pp.generators.to_verifier_setup();
+    let verifier_pp = guest::preprocess_verifier_prove_append(shared, verifier_setup, None);
+    let verify_fn = guest::build_verifier_prove_append(verifier_pp);
+    let verifier = Verifier::from_verify_fn(verify_fn);
+
+    let jolt_prover: BoxedProverFn = Box::new(guest::build_prover_prove_append(program, prover_pp));
+
+    Ok((jolt_prover, verifier))
+}
+
+// ---------------------------------------------------------------------------
+// Background prover worker
+// ---------------------------------------------------------------------------
 
 /// Spawn a background tokio task that polls the job store for pending jobs
 /// and runs the Jolt prover for each one.
