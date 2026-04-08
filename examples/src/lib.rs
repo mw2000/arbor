@@ -6,8 +6,8 @@ use tonic::transport::Channel;
 /// Default Arbor gRPC endpoint.
 ///
 /// Override by setting the `ARBOR_ENDPOINT` environment variable, e.g.:
-///   ARBOR_ENDPOINT=http://localhost:50051 cargo run --example bank-ledger
-pub const DEFAULT_ENDPOINT: &str = "http://[::1]:50051";
+///   ARBOR_ENDPOINT=http://[::1]:50051 cargo run --example bank-ledger
+pub const DEFAULT_ENDPOINT: &str = "http://localhost:50051";
 
 /// Connect to the Arbor gRPC server.
 ///
