@@ -33,11 +33,13 @@ RUN cargo chef prepare --recipe-path recipe.json
 FROM rust:1.94-bookworm AS builder
 
 # System dependencies:
-#   protobuf-compiler  – tonic-build needs protoc
-#   pkg-config/cmake   – native dependency builds
-#   git                – git-based Cargo dependencies (jolt, arkworks)
+#   protobuf-compiler    – tonic-build needs protoc
+#   libprotobuf-dev      – Google well-known .proto files (any.proto, timestamp.proto, etc.)
+#   pkg-config/cmake     – native dependency builds
+#   git                  – git-based Cargo dependencies (jolt, arkworks)
 RUN apt-get update && apt-get install -y --no-install-recommends \
         protobuf-compiler \
+        libprotobuf-dev \
         pkg-config \
         cmake \
         git \
