@@ -53,7 +53,12 @@ RUN rustup target add riscv64imac-unknown-none-elf
 
 # Install the Jolt CLI (needed to cross-compile the guest program to RISC-V).
 # Pinned to the same commit as jolt-sdk in Cargo.lock for reproducibility.
-RUN cargo install --git https://github.com/a16z/jolt --rev 18bfa50983c8202079f8a3ab11c82a96f43f92ef
+# GIT_SHORT_HASH / GIT_DATE are required because jolt's build.rs reads git
+# metadata via env!() but cargo's git checkout lacks a .git directory.
+RUN GIT_SHORT_HASH="18bfa509" GIT_DATE="unknown" \
+    cargo install --git https://github.com/a16z/jolt \
+        --rev 18bfa50983c8202079f8a3ab11c82a96f43f92ef \
+        --bin jolt
 
 WORKDIR /app
 
