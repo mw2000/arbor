@@ -1,0 +1,18 @@
+# Build artifacts
+target/
+
+# Git history (large, not needed in build)
+.git/
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Data files
+*.db
+
+# OS
+.DS_Store
+Thumbs.db

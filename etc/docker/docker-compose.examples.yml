@@ -1,0 +1,89 @@
+# Full stack for running Arbor examples.
+#
+# Starts MySQL, Trillian (log server + signer), and the Arbor service.
+# Arbor is built from the Dockerfile in this directory.
+#
+# Usage (from the repository root):
+#   docker compose -f etc/docker/docker-compose.examples.yml up -d
+#
+# Then run any example:
+#   cargo run --example bank-ledger
+#   cargo run --example audit-log
+#   cargo run --example software-supply-chain
+#   cargo run --example certificate-transparency
+#
+# Tear down:
+#   docker compose -f etc/docker/docker-compose.examples.yml down -v
+
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: trillian
+      MYSQL_DATABASE: trillian
+      MYSQL_USER: trillian
+      MYSQL_PASSWORD: trillian
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ../sql/trillian-schema.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "trillian", "-ptrillian"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  trillian-server:
+    image: gcr.io/trillian-opensource-ci/log_server
+    command:
+      - --mysql_uri=trillian:trillian@tcp(mysql:3306)/trillian
+      - --rpc_endpoint=0.0.0.0:8090
+      - --http_endpoint=0.0.0.0:8091
+      - --alsologtostderr
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "8090:8090"
+      - "8091:8091"
+
+  trillian-signer:
+    image: gcr.io/trillian-opensource-ci/log_signer
+    command:
+      - --mysql_uri=trillian:trillian@tcp(mysql:3306)/trillian
+      - --rpc_endpoint=0.0.0.0:8092
+      - --http_endpoint=0.0.0.0:8093
+      - --force_master
+      - --alsologtostderr
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  arbor:
+    build:
+      context: ../..
+      dockerfile: etc/docker/Dockerfile
+    ports:
+      - "50051:50051"
+    volumes:
+      - arbor_data:/data
+    depends_on:
+      trillian-server:
+        condition: service_started
+      trillian-signer:
+        condition: service_started
+    command:
+      - --listen
+      - "[::]:50051"
+      - --trillian-endpoint
+      - http://trillian-server:8090
+      - --create-tree
+      - --store-path
+      - /data/arbor-proofs.db
+      - --job-store-path
+      - /data/arbor-jobs.db
+
+volumes:
+  mysql_data:
+  arbor_data:

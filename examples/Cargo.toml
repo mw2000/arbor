@@ -1,0 +1,28 @@
+[package]
+name = "arbor-examples"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+arbor-server = { path = "../crates/server" }
+tonic = "0.12"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[[example]]
+name = "bank-ledger"
+path = "src/bank_ledger.rs"
+
+[[example]]
+name = "software-supply-chain"
+path = "src/software_supply_chain.rs"
+
+[[example]]
+name = "audit-log"
+path = "src/audit_log.rs"
+
+[[example]]
+name = "certificate-transparency"
+path = "src/certificate_transparency.rs"
