@@ -50,25 +50,9 @@ test-core:
 # Examples
 # --------------------------------------------------------------------------
 
-# Start the full example stack (MySQL + Trillian + Arbor)
-examples-up:
-    docker compose -f etc/docker/docker-compose.examples.yml up -d
-
-# Tear down the example stack
-examples-down:
-    docker compose -f etc/docker/docker-compose.examples.yml down -v
-
 # Run an example (e.g., just example bank-ledger)
 example name:
     cargo run --example {{name}}
-
-# --------------------------------------------------------------------------
-# Docker
-# --------------------------------------------------------------------------
-
-# Build the Arbor Docker image
-docker-build:
-    docker build -f etc/docker/Dockerfile -t arbor .
 
 # --------------------------------------------------------------------------
 # CI-style checks (run before pushing)
